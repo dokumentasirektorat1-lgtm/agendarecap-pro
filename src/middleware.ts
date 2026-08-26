@@ -34,8 +34,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  const dummyAuth = request.cookies.get("dummy_auth")?.value === "true";
-  const isAuthValid = user !== null || dummyAuth;
+  const isAuthValid = user !== null;
 
   const pathname = request.nextUrl.pathname;
   const isAuthRoute = pathname === '/login';

@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS public.agendas (
   notes TEXT,
   include_notes_in_share BOOLEAN DEFAULT false,
   is_completed BOOLEAN DEFAULT false,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- 3. Mengaktifkan Row Level Security (RLS)
@@ -102,3 +103,14 @@ DROP TRIGGER IF EXISTS on_auth_user_created_settings ON auth.users;
 CREATE TRIGGER on_auth_user_created_settings
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user_settings();
+
+-- =========================================================================
+-- MIGRATION NOTES (Jalankan di SQL Editor Supabase jika tabel sudah dibuat sebelumnya)
+-- =========================================================================
+--
+-- 1. Tambah kolom updated_at ke tabel agendas jika belum ada:
+-- ALTER TABLE public.agendas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL;
+--
+-- 2. Menjadikan user tertentu sebagai admin & disetujui (opsional, ganti email dengan milik Anda):
+-- UPDATE public.profiles SET role = 'admin', status = 'approved' WHERE email = 'admin@domain.com';
+

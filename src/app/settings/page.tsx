@@ -4,21 +4,16 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function SettingsPage() {
-  const { cookies } = await import("next/headers");
-  const dummyAuth = (await cookies()).get("dummy_auth")?.value === "true";
-
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user && !dummyAuth) {
+  if (!user) {
     redirect("/login");
   }
 
-  if (user) {
-    const { data: profile } = await supabase.from('profiles').select('status').eq('id', user.id).single();
-    if (profile?.status === 'pending') {
-      redirect("/waiting-approval");
-    }
+  const { data: profile } = await supabase.from('profiles').select('status').eq('id', user.id).single();
+  if (profile?.status === 'pending') {
+    redirect("/waiting-approval");
   }
 
   const initialSettings = await getAppSettings();

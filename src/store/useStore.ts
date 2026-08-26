@@ -39,12 +39,9 @@ export const useStore = create<StoreState>((set, get) => ({
     
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
-      const dummyAuth = typeof document !== 'undefined' && document.cookie.includes("dummy_auth=true");
 
-      if (authError || (!user && !dummyAuth)) {
+      if (authError || !user) {
         set({ error: "Gagal memverifikasi sesi login Anda.", isLoading: false });
-        // Jika dummy_auth true, biarkan data kosong saja (karena dummy auth tidak ada data real)
         return;
       }
 

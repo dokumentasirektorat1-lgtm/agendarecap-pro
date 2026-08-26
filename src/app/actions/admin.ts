@@ -23,12 +23,6 @@ function getAdminClient() {
 // Verify if the caller is an admin using Service Role to bypass any RLS issues
 async function checkIsAdmin(): Promise<{ isAdmin: boolean, reason?: string }> {
   try {
-    const { cookies } = await import("next/headers");
-    const dummyAuth = (await cookies()).get("dummy_auth")?.value === "true";
-    if (dummyAuth) {
-      return { isAdmin: true };
-    }
-
     const supabase = await createServerClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
