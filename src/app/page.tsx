@@ -3,13 +3,14 @@
 import { useStore, Agenda } from "@/store/useStore";
 import { format, isSameDay } from "date-fns";
 import { id } from "date-fns/locale";
-import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings } from "lucide-react";
+import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
 import Swal from "sweetalert2";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AddAgendaModal } from "@/components/AddAgendaModal";
+import { ExportAgendaModal } from "@/components/ExportAgendaModal";
 import { Calendar } from "@/components/Calendar";
 import { logout } from "./login/actions";
 import { getAppSettings, AppSettings } from "@/app/actions/settings";
@@ -18,6 +19,9 @@ import { useEffect } from "react";
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isCopyDropdownOpen, setIsCopyDropdownOpen] = useState(false);
+  const [isShareDropdownOpen, setIsShareDropdownOpen] = useState(false);
   const [editingAgenda, setEditingAgenda] = useState<Agenda | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
 
@@ -103,7 +107,7 @@ export default function Dashboard() {
       Swal.fire({
         icon: 'success',
         title: 'Tersalin!',
-        text: 'Rekap berhasil disalin ke clipboard.',
+        text: 'Rekap harian berhasil disalin ke clipboard.',
         timer: 1500,
         showConfirmButton: false,
         toast: true,
@@ -120,6 +124,52 @@ export default function Dashboard() {
         timer: 2000
       });
     }
+  };
+
+  const handleCopyWeekly = async (criteria: "next_7_days" | "monday_to_sunday") => {
+    const { getAppSettings } = await import("@/app/actions/settings");
+    const { formatWeeklyAgendasToWhatsApp } = await import("@/lib/whatsapp-formatter");
+    const settings = await getAppSettings();
+    const fullMessage = formatWeeklyAgendasToWhatsApp(criteria, agendas, settings, new Date());
+
+    try {
+      await navigator.clipboard.writeText(fullMessage);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
+      Swal.fire({
+        icon: 'success',
+        title: 'Tersalin!',
+        text: `Rekap agenda 1 minggu (${criteria === 'next_7_days' ? '7 Hari Ke Depan' : 'Senin - Minggu'}) berhasil disalin.`,
+        timer: 1500,
+        showConfirmButton: false,
+        toast: true,
+        position: 'top-end'
+      });
+    } catch (e) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal',
+        text: 'Gagal menyalin teks ke clipboard.',
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 2000
+      });
+    }
+  };
+
+  const handleShareWeekly = async (criteria: "next_7_days" | "monday_to_sunday") => {
+    const { getAppSettings } = await import("@/app/actions/settings");
+    const { formatWeeklyAgendasToWhatsApp } = await import("@/lib/whatsapp-formatter");
+    const settings = await getAppSettings();
+    const fullMessage = formatWeeklyAgendasToWhatsApp(criteria, agendas, settings, new Date());
+
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const waLink = isMobile
+      ? `whatsapp://send?text=${encodeURIComponent(fullMessage)}`
+      : `https://web.whatsapp.com/send?text=${encodeURIComponent(fullMessage)}`;
+    
+    window.open(waLink, "_blank");
   };
 
   const handleDeleteAgenda = async (id: string, title: string) => {
@@ -225,9 +275,9 @@ export default function Dashboard() {
 
         {/* Right Column: Time-Slot Visualizer & Details */}
         <section className="flex-1 min-w-0 pb-32 md:pb-0">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 glass p-6 rounded-[2rem] border border-white/5 shadow-xl">
-            <div>
-              <h2 className="text-2xl font-bold text-white mb-1">
+          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-6 glass p-6 rounded-[2rem] border border-white/5 shadow-xl">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl sm:text-2xl font-bold text-white mb-1 truncate">
                 {format(selectedDate, "EEEE, d MMMM yyyy", { locale: id })}
               </h2>
               <p className="text-zinc-400 text-sm">
@@ -237,21 +287,180 @@ export default function Dashboard() {
               </p>
             </div>
             
-            <div className="flex gap-2 w-full sm:w-auto">
-              <button
-                onClick={handleCopy}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-blue-500 hover:bg-blue-600 text-white shadow-lg shadow-blue-500/20 px-4 py-2.5 rounded-xl font-semibold transition-all active:scale-95"
-              >
-                {isCopied ? <CheckCircle2 className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4 text-white" />}
-                <span className="text-sm">{isCopied ? "Tersalin!" : "Copy"}</span>
-              </button>
-              <button
-                onClick={handleShare}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-white shadow-lg shadow-emerald-500/20 px-4 py-2.5 rounded-xl font-semibold transition-all active:scale-95"
-              >
-                <Share2 className="w-4 h-4 text-white" />
-                <span className="text-sm">Share WA</span>
-              </button>
+            <div className="flex gap-2.5 w-full xl:w-auto flex-wrap xl:flex-nowrap items-center xl:justify-end shrink-0">
+              {/* Copy Split Button */}
+              <div className="relative flex-1 sm:flex-none">
+                <div className="inline-flex items-center rounded-xl shadow-lg shadow-blue-500/20 bg-blue-500 hover:bg-blue-600 transition-all w-full">
+                  <button
+                    onClick={handleCopy}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 text-white font-semibold text-sm active:scale-95 transition-transform"
+                    title="Copy Agenda Harian"
+                  >
+                    {isCopied ? <CheckCircle2 className="w-4 h-4 text-white" /> : <Copy className="w-4 h-4 text-white" />}
+                    <span>{isCopied ? "Tersalin!" : "Copy"}</span>
+                  </button>
+                  <div className="w-[1px] h-5 bg-white/20" />
+                  <button
+                    onClick={() => {
+                      setIsCopyDropdownOpen(!isCopyDropdownOpen);
+                      setIsShareDropdownOpen(false);
+                    }}
+                    className="px-2.5 py-2.5 text-white/80 hover:text-white flex items-center justify-center transition-colors rounded-r-xl"
+                    title="Pilihan Copy Agenda"
+                  >
+                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isCopyDropdownOpen && "rotate-180")} />
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {isCopyDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setIsCopyDropdownOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-64 bg-[#18181b] border border-white/10 rounded-2xl shadow-2xl z-30 overflow-hidden py-1.5 backdrop-blur-xl"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-white/5 mb-1">
+                          Pilihan Rentang Copy
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            handleCopy();
+                            setIsCopyDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <Copy className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">Copy Agenda Harian</div>
+                            <div className="text-[10px] text-zinc-400">Tanggal terpilih di kalender</div>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleCopyWeekly("next_7_days");
+                            setIsCopyDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <CalendarDays className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">1 Minggu (7 Hari Ke Depan)</div>
+                            <div className="text-[10px] text-zinc-400">Hari ini s/d 7 hari kedepan</div>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleCopyWeekly("monday_to_sunday");
+                            setIsCopyDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <CalendarRange className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">1 Minggu (Senin - Minggu)</div>
+                            <div className="text-[10px] text-zinc-400">Senin s/d Minggu minggu ini</div>
+                          </div>
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Share WA Split Button */}
+              <div className="relative flex-1 sm:flex-none">
+                <div className="inline-flex items-center rounded-xl shadow-lg shadow-emerald-500/20 bg-emerald-500 hover:bg-emerald-600 transition-all w-full">
+                  <button
+                    onClick={handleShare}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 text-white font-semibold text-sm active:scale-95 transition-transform"
+                    title="Share WA Agenda Harian"
+                  >
+                    <Share2 className="w-4 h-4 text-white" />
+                    <span>Share WA</span>
+                  </button>
+                  <div className="w-[1px] h-5 bg-white/20" />
+                  <button
+                    onClick={() => {
+                      setIsShareDropdownOpen(!isShareDropdownOpen);
+                      setIsCopyDropdownOpen(false);
+                    }}
+                    className="px-2.5 py-2.5 text-white/80 hover:text-white flex items-center justify-center transition-colors rounded-r-xl"
+                    title="Pilihan Share WA"
+                  >
+                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform duration-200", isShareDropdownOpen && "rotate-180")} />
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {isShareDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-20" onClick={() => setIsShareDropdownOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute left-0 sm:left-auto sm:right-0 mt-2 w-64 bg-[#18181b] border border-white/10 rounded-2xl shadow-2xl z-30 overflow-hidden py-1.5 backdrop-blur-xl"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-white/5 mb-1">
+                          Pilihan Rentang Share WA
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            handleShare();
+                            setIsShareDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <Share2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">Share WA Harian</div>
+                            <div className="text-[10px] text-zinc-400">Tanggal terpilih di kalender</div>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleShareWeekly("next_7_days");
+                            setIsShareDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <CalendarDays className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">1 Minggu (7 Hari Ke Depan)</div>
+                            <div className="text-[10px] text-zinc-400">Hari ini s/d 7 hari kedepan</div>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            handleShareWeekly("monday_to_sunday");
+                            setIsShareDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <CalendarRange className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">1 Minggu (Senin - Minggu)</div>
+                            <div className="text-[10px] text-zinc-400">Senin s/d Minggu minggu ini</div>
+                          </div>
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
+
+              {/* Tambah Baru Button */}
               <button
                 onClick={() => setIsAddModalOpen(true)}
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/20 px-4 py-2.5 rounded-xl font-semibold transition-all hover:opacity-90 active:scale-95 border-0"
@@ -394,6 +603,16 @@ export default function Dashboard() {
               </table>
             </div>
           </div>
+          
+          <div className="mt-8 flex justify-center">
+            <button
+              onClick={() => setIsExportModalOpen(true)}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white rounded-xl transition-all shadow-lg text-sm font-medium"
+            >
+              <FileDown className="w-4 h-4" />
+              Eksport Agenda ke Excel
+            </button>
+          </div>
         </section>
       </div>
 
@@ -402,6 +621,12 @@ export default function Dashboard() {
         onClose={handleCloseModal}
         defaultDate={selectedDate || new Date()}
         editAgenda={editingAgenda}
+      />
+
+      <ExportAgendaModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        appSettings={appSettings}
       />
 
     </main>
