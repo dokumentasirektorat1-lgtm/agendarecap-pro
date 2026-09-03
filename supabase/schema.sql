@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS public.agendas (
   notes TEXT,
   include_notes_in_share BOOLEAN DEFAULT false,
   is_completed BOOLEAN DEFAULT false,
+  status TEXT DEFAULT 'confirmed',
+  "privateNotes" TEXT,
+  "isShareable" BOOLEAN DEFAULT true,
+  "groupId" UUID,
+  "isOnline" BOOLEAN DEFAULT false,
+  "onlineLink" TEXT,
+  "meetingId" TEXT,
+  "meetingPasscode" TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
@@ -113,4 +121,13 @@ CREATE TRIGGER on_auth_user_created_settings
 --
 -- 2. Menjadikan user tertentu sebagai admin & disetujui (opsional, ganti email dengan milik Anda):
 -- UPDATE public.profiles SET role = 'admin', status = 'approved' WHERE email = 'admin@domain.com';
-
+--
+-- 3. Menambahkan kolom baru untuk fitur Multi-Hari & Reminders:
+-- ALTER TABLE public.agendas ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'confirmed';
+-- ALTER TABLE agendas ADD COLUMN "privateNotes" TEXT;
+-- ALTER TABLE agendas ADD COLUMN "isShareable" BOOLEAN DEFAULT true;
+-- ALTER TABLE agendas ADD COLUMN "groupId" UUID;
+-- ALTER TABLE agendas ADD COLUMN "isOnline" BOOLEAN DEFAULT false;
+-- ALTER TABLE agendas ADD COLUMN "onlineLink" TEXT;
+-- ALTER TABLE agendas ADD COLUMN "meetingId" TEXT;
+-- ALTER TABLE agendas ADD COLUMN "meetingPasscode" TEXT;

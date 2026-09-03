@@ -1,0 +1,16 @@
+{
+  "name": "AgendaRecap Pro",
+  "short_name": "AgendaRecap",
+  "description": "Aplikasi rekap agenda pimpinan dengan notifikasi internal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121214",
+  "theme_color": "#8b5cf6",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}

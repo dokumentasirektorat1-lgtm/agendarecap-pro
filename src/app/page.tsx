@@ -3,7 +3,7 @@
 import { useStore, Agenda } from "@/store/useStore";
 import { format, isSameDay } from "date-fns";
 import { id } from "date-fns/locale";
-import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown } from "lucide-react";
+import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
 import Swal from "sweetalert2";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { AddAgendaModal } from "@/components/AddAgendaModal";
 import { ExportAgendaModal } from "@/components/ExportAgendaModal";
 import { Calendar } from "@/components/Calendar";
+import { MonthlyCalendarView } from "@/components/MonthlyCalendarView";
 import { logout } from "./login/actions";
 import { getAppSettings, AppSettings } from "@/app/actions/settings";
 import { useEffect } from "react";
@@ -23,7 +24,10 @@ export default function Dashboard() {
   const [isCopyDropdownOpen, setIsCopyDropdownOpen] = useState(false);
   const [isShareDropdownOpen, setIsShareDropdownOpen] = useState(false);
   const [editingAgenda, setEditingAgenda] = useState<Agenda | null>(null);
+  const [viewingNotes, setViewingNotes] = useState<{title: string, notes: string} | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  const [isUnscheduledDrawerOpen, setIsUnscheduledDrawerOpen] = useState(false);
 
   const { agendas, sharedDates, toggleComplete, deleteAgenda, markAsShared, isLoading, error, fetchAgendas } = useStore();
 
@@ -33,8 +37,10 @@ export default function Dashboard() {
   }, [fetchAgendas]);
 
   const selectedAgendas = agendas
-    .filter((a) => isSameDay(new Date(a.scheduled_at), selectedDate))
+    .filter((a) => isSameDay(new Date(a.scheduled_at), selectedDate) && a.status !== 'unscheduled')
     .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+
+  const unscheduledAgendas = agendas.filter(a => a.status === 'unscheduled');
 
   const [isCopied, setIsCopied] = useState(false);
 
@@ -201,7 +207,7 @@ export default function Dashboard() {
   };
 
   // Convert map to specific Date objects 
-  const agendaDates = agendas.map(a => new Date(a.scheduled_at));
+  const agendaDates = agendas.filter(a => a.status !== 'unscheduled').map(a => new Date(a.scheduled_at));
 
   return (
     <main className="min-h-screen relative overflow-hidden bg-background">
@@ -247,6 +253,22 @@ export default function Dashboard() {
                 <Settings className="w-5 h-5 text-purple-400" />
                 <span className="font-medium text-sm">Pengaturan Aplikasi</span>
               </Link>
+              <Link 
+                href="/consultation"
+                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition-colors text-zinc-300 hover:text-white relative overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <Shield className="w-5 h-5 text-orange-400" />
+                <span className="font-medium text-sm text-orange-50/90 group-hover:text-white">Mode Konsultasi</span>
+              </Link>
+              <Link 
+                href="/reminders"
+                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition-colors text-zinc-300 hover:text-white relative overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                <BellRing className="w-5 h-5 text-blue-400" />
+                <span className="font-medium text-sm text-blue-50/90 group-hover:text-white">Pengingat Pribadi</span>
+              </Link>
               <button 
                 onClick={() => logout()}
                 className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-red-400/10 border border-white/5 rounded-xl transition-colors text-zinc-400 hover:text-red-400"
@@ -270,6 +292,56 @@ export default function Dashboard() {
                 hasAgenda: "hasAgenda"
               }}
             />
+          </div>
+
+          {/* Unscheduled Drawer */}
+          <div className="glass rounded-[2rem] p-4 shadow-xl border border-white/5 flex flex-col overflow-hidden">
+            <button 
+              onClick={() => setIsUnscheduledDrawerOpen(!isUnscheduledDrawerOpen)}
+              className="flex items-center justify-between w-full p-2 text-zinc-300 hover:text-white transition-colors"
+            >
+              <div className="flex items-center gap-2 font-semibold">
+                <Archive className="w-5 h-5 text-zinc-400" />
+                <span>Belum Ada Tanggal</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-400 text-xs font-bold border border-orange-500/20">{unscheduledAgendas.length}</span>
+                <ChevronDown className={cn("w-4 h-4 transition-transform", isUnscheduledDrawerOpen && "rotate-180")} />
+              </div>
+            </button>
+            
+            <AnimatePresence>
+              {isUnscheduledDrawerOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-4 flex flex-col gap-3 mt-2 border-t border-white/10 max-h-[300px] overflow-y-auto hide-scrollbar">
+                    {unscheduledAgendas.length > 0 ? (
+                      unscheduledAgendas.map(agenda => (
+                        <div key={agenda.id} className="p-3 bg-white/5 border border-white/5 rounded-xl hover:bg-white/10 transition-colors flex justify-between items-start gap-4">
+                          <div>
+                            <p className="font-semibold text-white text-sm">{agenda.title}</p>
+                            <p className="text-xs text-zinc-400">{agenda.location}</p>
+                          </div>
+                          <button
+                            onClick={() => handleEdit(agenda)}
+                            className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors border border-transparent"
+                            title="Kembalikan ke Kalender"
+                          >
+                            <CalendarRange className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs text-zinc-500 text-center py-4 italic">Semua agenda sudah memiliki tanggal yang pasti.</p>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </aside>
 
@@ -460,149 +532,233 @@ export default function Dashboard() {
                 </AnimatePresence>
               </div>
 
+              {/* Toggle View Mode Button */}
+              <div className="flex bg-white/5 rounded-xl border border-white/5 p-1 shadow-lg w-full sm:w-auto overflow-hidden">
+                <button
+                  onClick={() => setViewMode("list")}
+                  className={cn(
+                    "flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                    viewMode === "list" ? "bg-purple-500 text-white shadow-md" : "text-zinc-400 hover:text-white"
+                  )}
+                  title="Tampilan Daftar"
+                >
+                  <AlignLeft className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setViewMode("calendar")}
+                  className={cn(
+                    "flex-1 sm:flex-none flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                    viewMode === "calendar" ? "bg-purple-500 text-white shadow-md" : "text-zinc-400 hover:text-white"
+                  )}
+                  title="Tampilan Kalender"
+                >
+                  <CalendarRange className="w-4 h-4" />
+                </button>
+              </div>
+
               {/* Tambah Baru Button */}
               <button
                 onClick={() => setIsAddModalOpen(true)}
-                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/20 px-4 py-2.5 rounded-xl font-semibold transition-all hover:opacity-90 active:scale-95 border-0"
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/20 px-4 py-2.5 rounded-xl font-semibold transition-all hover:opacity-90 active:scale-95 border-0 text-sm shrink-0"
               >
-                <Plus className="w-4 h-4 text-white" />
-                <span className="text-sm shrink-0">Tambah Baru</span>
+                <Plus className="w-4 h-4" />
+                <span>Tambah Baru</span>
               </button>
             </div>
           </div>
 
-          <div className="glass rounded-[2rem] border border-white/5 shadow-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-white/10 bg-white/5">
-                    <th className="px-6 py-4 font-semibold text-zinc-400 text-sm w-16 text-center">No</th>
-                    <th className="px-6 py-4 font-semibold text-zinc-400 text-sm w-24">Waktu</th>
-                    <th className="px-6 py-4 font-semibold text-zinc-400 text-sm w-16 text-center">Status</th>
-                    <th className="px-6 py-4 font-semibold text-zinc-400 text-sm">Detail Agenda</th>
-                    <th className="px-6 py-4 font-semibold text-zinc-400 text-sm text-right w-32">Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <AnimatePresence mode="popLayout">
-                    {isLoading ? (
-                      <tr>
-                        <td colSpan={5} className="py-24 text-center">
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center max-w-sm mx-auto">
-                            <div className="w-8 h-8 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mb-4" />
-                            <h3 className="text-lg text-zinc-400 font-semibold mb-1">Memuat Data</h3>
-                            <p className="text-zinc-500 text-sm">Menyinkronkan dengan database...</p>
-                          </motion.div>
-                        </td>
-                      </tr>
-                    ) : error ? (
-                      <tr>
-                        <td colSpan={5} className="py-24 text-center">
-                          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center max-w-sm mx-auto p-6 bg-red-500/10 border border-red-500/20 rounded-2xl">
-                            <Shield className="w-10 h-10 text-red-400 mb-3" />
-                            <h3 className="text-lg text-red-400 font-semibold mb-1">Terjadi Kesalahan</h3>
-                            <p className="text-red-400/80 text-sm">{error}</p>
-                            <button onClick={() => fetchAgendas()} className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-sm font-medium transition-colors">Coba Lagi</button>
-                          </motion.div>
-                        </td>
-                      </tr>
-                    ) : selectedAgendas.length > 0 ? (
-                      selectedAgendas.map((agenda, index) => (
-                        <motion.tr
-                          layout
-                          key={agenda.id}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, scale: 0.95 }}
-                          className={cn(
-                            "border-b border-white/5 transition-colors hover:bg-white/[0.02]",
-                            agenda.is_completed ? "opacity-70" : ""
-                          )}
-                        >
-                          <td className="px-6 py-5 text-center text-zinc-500 font-medium">
-                            {index + 1}
+          {viewMode === "list" ? (
+            <div className="glass rounded-[2rem] border border-white/5 shadow-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-white/10 bg-white/5">
+                      <th className="px-6 py-4 font-semibold text-zinc-400 text-sm w-16 text-center">No</th>
+                      <th className="px-6 py-4 font-semibold text-zinc-400 text-sm w-24">Waktu</th>
+                      <th className="px-6 py-4 font-semibold text-zinc-400 text-sm w-16 text-center">Status</th>
+                      <th className="px-6 py-4 font-semibold text-zinc-400 text-sm">Detail Agenda</th>
+                      <th className="px-6 py-4 font-semibold text-zinc-400 text-sm text-right w-32">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <AnimatePresence mode="popLayout">
+                      {isLoading ? (
+                        <tr>
+                          <td colSpan={5} className="py-24 text-center">
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center max-w-sm mx-auto">
+                              <div className="w-8 h-8 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin mb-4" />
+                              <h3 className="text-lg text-zinc-400 font-semibold mb-1">Memuat Data</h3>
+                              <p className="text-zinc-500 text-sm">Menyinkronkan dengan database...</p>
+                            </motion.div>
                           </td>
-                          <td className="px-6 py-5 text-white font-semibold">
-                            {format(new Date(agenda.scheduled_at), "HH:mm")}
+                        </tr>
+                      ) : error ? (
+                        <tr>
+                          <td colSpan={5} className="py-24 text-center">
+                            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center max-w-sm mx-auto p-6 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                              <Shield className="w-10 h-10 text-red-400 mb-3" />
+                              <h3 className="text-lg text-red-400 font-semibold mb-1">Terjadi Kesalahan</h3>
+                              <p className="text-red-400/80 text-sm">{error}</p>
+                              <button onClick={() => fetchAgendas()} className="mt-4 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-sm font-medium transition-colors">Coba Lagi</button>
+                            </motion.div>
                           </td>
-                          <td className="px-6 py-5">
-                            <button
-                              onClick={() => toggleComplete(agenda.id)}
-                              className="mx-auto block shrink-0 transition-transform active:scale-75"
-                            >
-                              {agenda.is_completed ? (
-                                <CheckCircle2 className="w-6 h-6 text-emerald-400" />
-                              ) : (
-                                <Circle className="w-6 h-6 text-zinc-500 hover:text-purple-400 transition-colors" />
-                              )}
-                            </button>
-                          </td>
-                          <td className="px-6 py-5">
-                            <div className="flex flex-col gap-1 min-w-[200px]">
-                              <p className={cn(
-                                "font-semibold text-base transition-colors",
-                                agenda.is_completed ? "text-zinc-400 line-through" : "text-white"
-                              )}>
-                                {agenda.title}
-                              </p>
-                              <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                                <MapPin className="w-3 h-3 text-purple-400" />
-                                <span>{agenda.location}</span>
-                              </div>
-                              {agenda.notes && !agenda.is_completed && (
-                                <div className="mt-2 text-sm text-zinc-400 border-l-[3px] border-white/10 pl-3">
-                                  {agenda.notes}
-                                </div>
-                              )}
-                              {agenda.include_notes_in_share && agenda.notes && !agenda.is_completed && (
-                                <span className="text-[10px] text-emerald-400/80 uppercase font-bold tracking-wider mt-1 flex items-center gap-1">
-                                  <Share2 className="w-3 h-3" /> Included in Share
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-6 py-5">
-                            <div className="flex items-center justify-end gap-2 text-right">
-                              <button
-                                onClick={() => handleEdit(agenda)}
-                                className="p-2 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors border border-transparent hover:border-blue-400/20"
-                                title="Edit Agenda"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteAgenda(agenda.id, agenda.title)}
-                                className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border border-transparent hover:border-red-400/20"
-                                title="Hapus Agenda"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </motion.tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td colSpan={5} className="py-24 text-center">
-                          <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="flex flex-col items-center justify-center max-w-sm mx-auto"
+                        </tr>
+                      ) : selectedAgendas.length > 0 ? (
+                        selectedAgendas.map((agenda, index) => (
+                          <motion.tr
+                            layout
+                            key={agenda.id}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className={cn(
+                              "border-b border-white/5 transition-colors hover:bg-white/[0.02]",
+                              agenda.is_completed ? "opacity-70" : ""
+                            )}
                           >
-                            <CalendarHeart className="w-12 h-12 text-zinc-600 mb-4" />
-                            <h3 className="text-lg text-zinc-400 font-semibold mb-1">Meja Kerja Kosong</h3>
-                            <p className="text-zinc-500 text-sm">
-                              Gunakan tombol "Tambah Item" di ujung kanan atas untuk membuat jadwal baru di tabel ini.
-                            </p>
-                          </motion.div>
-                        </td>
-                      </tr>
-                    )}
-                  </AnimatePresence>
-                </tbody>
-              </table>
+                            <td className="px-6 py-5 text-center text-zinc-500 font-medium">
+                              {index + 1}
+                            </td>
+                            <td className="px-6 py-5 text-white font-semibold">
+                              {format(new Date(agenda.scheduled_at), "HH:mm")}
+                            </td>
+                            <td className="px-6 py-5">
+                              <button
+                                onClick={() => toggleComplete(agenda.id)}
+                                className="mx-auto block shrink-0 transition-transform active:scale-75"
+                              >
+                                {agenda.is_completed ? (
+                                  <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                                ) : (
+                                  <Circle className="w-6 h-6 text-zinc-500 hover:text-purple-400 transition-colors" />
+                                )}
+                              </button>
+                            </td>
+                            <td className="px-6 py-5">
+                              <div className="flex flex-col gap-1 min-w-[200px]">
+                                <p className={cn(
+                                  "font-semibold text-base transition-colors flex items-center gap-2",
+                                  agenda.is_completed ? "text-zinc-400 line-through" : "text-white"
+                                )}>
+                                  {agenda.title}
+                                  {!agenda.isShareable && (
+                                    <span className="px-1.5 py-0.5 rounded text-[9px] bg-red-500/20 text-red-400 font-bold tracking-wider inline-flex items-center gap-1">
+                                      <Shield className="w-2.5 h-2.5"/> INTERNAL
+                                    </span>
+                                  )}
+                                </p>
+                                
+                                <div className="flex flex-wrap items-center gap-2 mt-1">
+                                  {agenda.status === 'confirmed' && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/10 text-emerald-400 font-bold uppercase tracking-wider border border-emerald-500/20">Confirmed</span>
+                                  )}
+                                  {agenda.status === 'pending_consultation' && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-400 font-bold uppercase tracking-wider border border-orange-500/20">Pending Consultation</span>
+                                  )}
+                                  {agenda.status === 'rescheduled' && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-400 font-bold uppercase tracking-wider border border-blue-500/20">Rescheduled</span>
+                                  )}
+                                  {agenda.status === 'cancelled' && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/10 text-red-400 font-bold uppercase tracking-wider border border-red-500/20">Cancelled</span>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-col gap-1 mt-1.5">
+                                  <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                                    {agenda.isOnline ? <Video className="w-3.5 h-3.5 text-blue-400" /> : <MapPin className="w-3.5 h-3.5 text-purple-400" />}
+                                    <span>{agenda.location}</span>
+                                  </div>
+                                  {agenda.isOnline && agenda.onlineLink && (
+                                    <div className="flex items-center gap-1.5 text-xs text-blue-400/80">
+                                      <Link2 className="w-3.5 h-3.5" />
+                                      <a href={agenda.onlineLink} target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-blue-400 max-w-[200px] truncate block" onClick={(e) => e.stopPropagation()}>
+                                        {agenda.onlineLink}
+                                      </a>
+                                    </div>
+                                  )}
+                                  {agenda.isOnline && agenda.meetingId && (
+                                    <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 pl-5">
+                                      <span className="font-medium text-zinc-400">ID:</span> {agenda.meetingId}
+                                      {agenda.meetingPasscode && <><span className="font-medium text-zinc-400 ml-2">Pass:</span> {agenda.meetingPasscode}</>}
+                                    </div>
+                                  )}
+                                </div>
+                                {agenda.notes && !agenda.is_completed && (
+                                  <div className="mt-2 text-sm text-zinc-400 border-l-[3px] border-white/10 pl-3">
+                                    {agenda.notes}
+                                  </div>
+                                )}
+                                
+                                {agenda.privateNotes && !agenda.is_completed && (
+                                  <div className="mt-2 text-sm">
+                                    <button
+                                      onClick={() => setViewingNotes({title: agenda.title, notes: agenda.privateNotes!})}
+                                      className="px-3 py-1 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors inline-block"
+                                    >
+                                      🔒 Lihat Bahan Konsultasi
+                                    </button>
+                                  </div>
+                                )}
+
+                                {agenda.include_notes_in_share && agenda.notes && !agenda.is_completed && (
+                                  <span className="text-[10px] text-emerald-400/80 uppercase font-bold tracking-wider mt-1 flex items-center gap-1">
+                                    <Share2 className="w-3 h-3" /> Included in Share
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-5">
+                              <div className="flex items-center justify-end gap-2 text-right">
+                                <button
+                                  onClick={() => handleEdit(agenda)}
+                                  className="p-2 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors border border-transparent hover:border-blue-400/20"
+                                  title="Edit Agenda"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteAgenda(agenda.id, agenda.title)}
+                                  className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors border border-transparent hover:border-red-400/20"
+                                  title="Hapus Agenda"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </motion.tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={5} className="py-24 text-center">
+                            <motion.div
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              className="flex flex-col items-center justify-center max-w-sm mx-auto"
+                            >
+                              <CalendarHeart className="w-12 h-12 text-zinc-600 mb-4" />
+                              <h3 className="text-lg text-zinc-400 font-semibold mb-1">Meja Kerja Kosong</h3>
+                              <p className="text-zinc-500 text-sm">
+                                Gunakan tombol "Tambah Item" di ujung kanan atas untuk membuat jadwal baru di tabel ini.
+                              </p>
+                            </motion.div>
+                          </td>
+                        </tr>
+                      )}
+                    </AnimatePresence>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          ) : (
+            <MonthlyCalendarView 
+              currentDate={selectedDate} 
+              onDateClick={(date) => {
+                setSelectedDate(date);
+                setViewMode("list");
+              }}
+              onEditAgenda={handleEdit}
+            />
+          )}
           
           <div className="mt-8 flex justify-center">
             <button
@@ -628,6 +784,60 @@ export default function Dashboard() {
         onClose={() => setIsExportModalOpen(false)}
         appSettings={appSettings}
       />
+
+      <AnimatePresence>
+        {viewingNotes && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setViewingNotes(null)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90%] max-w-md bg-[#121214] border border-orange-500/20 rounded-3xl p-6 shadow-2xl shadow-orange-500/10 z-50 overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-orange-400 to-red-500" />
+              <div className="flex justify-between items-center mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Shield className="w-5 h-5 text-orange-400" />
+                    Bahan Konsultasi Pimpinan
+                  </h2>
+                  <p className="text-xs text-orange-400/80 mt-1 uppercase font-bold tracking-wider">Bersifat Internal & Privat</p>
+                </div>
+                <button
+                  onClick={() => setViewingNotes(null)}
+                  className="p-2 bg-white/5 hover:bg-white/10 rounded-full transition-colors text-zinc-400 hover:text-white"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="mb-4 text-sm font-semibold text-white/50 bg-black/20 p-3 rounded-xl border border-white/5">
+                Agenda: {viewingNotes.title}
+              </div>
+
+              <div className="bg-orange-500/5 border border-orange-500/10 rounded-xl p-4 min-h-[120px] text-zinc-300 text-sm leading-relaxed whitespace-pre-wrap">
+                {viewingNotes.notes}
+              </div>
+
+              <div className="pt-6">
+                <button
+                  onClick={() => setViewingNotes(null)}
+                  className="w-full flex items-center justify-center py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl transition-all"
+                >
+                  Tutup
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
     </main>
   );

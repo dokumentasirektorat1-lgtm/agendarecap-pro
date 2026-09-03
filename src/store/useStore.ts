@@ -9,8 +9,17 @@ export type Agenda = {
   location: string;
   notes?: string;
   scheduled_at: string;
+  privateNotes?: string;
   is_completed: boolean;
   include_notes_in_share: boolean;
+  status: 'confirmed' | 'pending_consultation' | 'rescheduled' | 'cancelled' | 'unscheduled';
+  isShareable: boolean;
+  groupId?: string;
+  isOnline?: boolean;
+  onlineLink?: string;
+  meetingId?: string;
+  meetingPasscode?: string;
+  isUrgent?: boolean;
   updated_at: string;
 };
 
@@ -72,6 +81,9 @@ export const useStore = create<StoreState>((set, get) => ({
         ...agenda,
         user_id: user?.id, // Jika tidak ada user ID, RLS supabase akan menolak secara otomatis
         is_completed: false,
+        status: agenda.status || 'confirmed',
+        isShareable: agenda.isShareable !== undefined ? agenda.isShareable : true,
+        isOnline: agenda.isOnline || false,
         updated_at: new Date().toISOString()
       };
 
@@ -95,11 +107,11 @@ export const useStore = create<StoreState>((set, get) => ({
       }
       return false;
     } catch (e: any) {
-      console.error("Gagal menambahkan agenda:", e);
+      console.error("Gagal menambahkan agenda:", e?.message || e);
       Swal.fire({
         icon: 'error',
         title: 'Gagal Tambah Data',
-        text: e.message || 'Agenda gagal disimpan ke database. Coba lagi.'
+        text: e?.message || e?.details || 'Agenda gagal disimpan ke database. Coba lagi.'
       });
       return false;
     }
@@ -181,11 +193,11 @@ export const useStore = create<StoreState>((set, get) => ({
       .eq("id", id);
 
     if (error) {
-      console.error("Gagal mengupdate agenda:", error);
+      console.error("Gagal mengupdate agenda:", error?.message || error);
       Swal.fire({
         icon: 'error',
         title: 'Gagal Update',
-        text: error.message
+        text: error?.message || error?.details || 'Gagal update agenda.'
       });
       // Revert Optimistic Update
       set({ agendas: previousAgendas });

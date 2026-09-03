@@ -7,11 +7,30 @@ export interface AgendaItem {
   location?: string | null;
   scheduled_at: string;
   notes?: string | null;
+  privateNotes?: string | null;
   include_notes_in_share: boolean;
+  status?: 'confirmed' | 'pending_consultation' | 'rescheduled' | 'cancelled' | 'unscheduled';
+  isShareable?: boolean;
   is_completed: boolean;
+  isOnline?: boolean;
+  onlineLink?: string;
+  meetingId?: string;
+  meetingPasscode?: string;
 }
 
 export type WeeklyCriteria = "next_7_days" | "monday_to_sunday";
+
+function formatTextWithLinks(prefix: string, text: string) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  const formattedParts = parts.map(part => {
+    if (urlRegex.test(part)) return part;
+    return part.replace(/^(\s*)([\s\S]*?)(\s*)$/, (match, p1, p2, p3) => {
+      return p2 ? `${p1}_${p2}_${p3}` : match;
+    });
+  });
+  return `_${prefix}_ ${formattedParts.join('')}`.trim();
+}
 
 export function formatAgendasToWhatsApp(
   dateTitle: string, 
@@ -41,7 +60,11 @@ export function formatAgendasToWhatsApp(
     textPrefix = `*UPDATE ${appName.toUpperCase()}*\n*${formattedDateTitle}*\n_(Pembaruan pada ${updateTimeStr})_`;
   }
 
-  if (!agendas || agendas.length === 0) {
+  const validAgendas = agendas.filter(
+    (a) => a.isShareable !== false && (!a.status || a.status === 'confirmed')
+  );
+
+  if (!validAgendas || validAgendas.length === 0) {
     let emptyText = `${textPrefix}\n\n_Belum ada agenda di tanggal ini._`;
     if (isWatermarkEnabled) {
       emptyText += `\n\n------------------------------------------\n_${watermarkText}_`;
@@ -51,7 +74,7 @@ export function formatAgendasToWhatsApp(
 
   let text = `${textPrefix}\n\n`;
 
-  agendas.forEach((agenda, index) => {
+  validAgendas.forEach((agenda, index) => {
     const statusInfo = agenda.is_completed ? " (Selesai)" : "";
     
     // 1. Judul Agenda
@@ -65,9 +88,22 @@ export function formatAgendasToWhatsApp(
     }
     text += `${detailLine}\n`;
 
+    // 2.5. Online Meeting Details
+    if (agenda.isOnline) {
+      if (agenda.onlineLink) {
+        text += `_Link:_ ${agenda.onlineLink}\n`;
+      }
+      if (agenda.meetingId) {
+        text += `_Meeting ID:_ ${agenda.meetingId}\n`;
+      }
+      if (agenda.meetingPasscode) {
+        text += `_Passcode:_ ${agenda.meetingPasscode}\n`;
+      }
+    }
+
     // 3. Catatan khusus
     if (agenda.notes && agenda.include_notes_in_share) {
-      text += `_Catatan: ${agenda.notes}_\n`;
+      text += `${formatTextWithLinks('Catatan:', agenda.notes)}\n`;
     }
 
     text += '\n'; // Spacer below each agenda item
@@ -134,7 +170,7 @@ export function formatWeeklyAgendasToWhatsApp(
   days.forEach((dayDate) => {
     const dayTitle = formatTanggal(dayDate);
     const dayAgendas = (agendas || [])
-      .filter((a) => isSameDay(new Date(a.scheduled_at), dayDate))
+      .filter((a) => a.isShareable !== false && (!a.status || a.status === 'confirmed') && isSameDay(new Date(a.scheduled_at), dayDate))
       .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
     text += `*${dayTitle}*\n`;
@@ -153,8 +189,14 @@ export function formatWeeklyAgendasToWhatsApp(
         }
         text += `${detailLine}\n`;
 
+        if (agenda.isOnline) {
+          if (agenda.onlineLink) text += `_Link:_ ${agenda.onlineLink}\n`;
+          if (agenda.meetingId) text += `_Meeting ID:_ ${agenda.meetingId}\n`;
+          if (agenda.meetingPasscode) text += `_Passcode:_ ${agenda.meetingPasscode}\n`;
+        }
+
         if (agenda.notes && agenda.include_notes_in_share) {
-          text += `_Catatan: ${agenda.notes}_\n`;
+          text += `${formatTextWithLinks('Catatan:', agenda.notes)}\n`;
         }
       });
       text += `\n`;
