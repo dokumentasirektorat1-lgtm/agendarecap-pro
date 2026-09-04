@@ -1,14 +1,17 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Outfit } from "next/font/google";
 import "./globals.css";
 
 const outfit = Outfit({ subsets: ["latin"] });
 
+export const viewport: Viewport = {
+  themeColor: "#8b5cf6",
+};
+
 export const metadata: Metadata = {
   title: "AgendaRecap | Jadwal & Rekap Harian",
   description: "Ciptakan dan kelola agenda harian Anda dengan mudah, dan bagikan rekapnya langsung ke WhatsApp.",
   manifest: "/manifest.json",
-  themeColor: "#8b5cf6",
 };
 
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
