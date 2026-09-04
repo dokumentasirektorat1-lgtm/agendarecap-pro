@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 
 export default function RemindersPage() {
-  const { reminders, addReminder, toggleReminder, deleteReminder, updateReminder } = useReminderStore();
+  const { reminders, fetchReminders, addReminder, toggleReminder, deleteReminder, updateReminder } = useReminderStore();
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
@@ -19,10 +19,11 @@ export default function RemindersPage() {
   const [permission, setPermission] = useState<NotificationPermission>("default");
 
   useEffect(() => {
+    fetchReminders();
     if ('Notification' in window) {
       setPermission(Notification.permission);
     }
-  }, []);
+  }, [fetchReminders]);
 
   // Sync with Web Push Backend Server to empower offline notifications
   useEffect(() => {
@@ -68,6 +69,7 @@ export default function RemindersPage() {
     syncWithBackend();
     return () => { isMounted = false; };
   }, [reminders, permission]);
+
   const requestPermission = async () => {
     if (!('Notification' in window)) {
       Swal.fire({ icon: 'error', title: 'Tidak Didukung', text: 'Browser tidak mendukung Notifikasi.' });
@@ -148,7 +150,7 @@ export default function RemindersPage() {
                 <BellRing className="w-6 h-6 text-blue-400" />
                 Pengingat Pribadi
               </h1>
-              <p className="text-sm text-zinc-400 mt-1">Notifikasi rutin terisolasi dari agenda utama (Local Sync)</p>
+              <p className="text-sm text-zinc-400 mt-1">Pengingat tersinkronisasi otomatis di semua perangkat (Cross-Device Account Sync)</p>
             </div>
           </div>
         </header>
@@ -215,7 +217,7 @@ export default function RemindersPage() {
                     <select
                       value={frequency}
                       onChange={(e) => setFrequency(e.target.value as Frequency)}
-                      className="w-full bg-[#1A1A1D] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500/50 [&>option]:bg-[#121214]"
+                      className="w-full bg-[#1A1A1D] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500/5 [&>option]:bg-[#121214]"
                     >
                       <option value="once">Sekali Jalan (One-time)</option>
                       <option value="daily">Setiap Hari (Daily)</option>
@@ -228,7 +230,7 @@ export default function RemindersPage() {
                     <select
                       value={sound}
                       onChange={(e) => setSound(e.target.value)}
-                      className="w-full bg-[#1A1A1D] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500/50 [&>option]:bg-[#121214]"
+                      className="w-full bg-[#1A1A1D] border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500/5 [&>option]:bg-[#121214]"
                     >
                       <option value="default">Sistem / Default</option>
                       <option value="beep">Beep Ringan (Web)</option>
@@ -308,7 +310,7 @@ export default function RemindersPage() {
             <div className="col-span-full py-12 flex flex-col items-center justify-center text-center">
               <Bell className="w-16 h-16 text-zinc-700 mb-4" />
               <h3 className="text-lg font-bold text-zinc-400">Belum ada pengingat</h3>
-              <p className="text-zinc-500 text-sm max-w-sm mt-1">Kelola tugas pribadi Anda secara lokal dengan notifikasi yang tepat waktu.</p>
+              <p className="text-zinc-500 text-sm max-w-sm mt-1">Pengingat Anda akan tersinkronisasi otomatis di semua perangkat yang terhubung.</p>
             </div>
           )}
         </div>

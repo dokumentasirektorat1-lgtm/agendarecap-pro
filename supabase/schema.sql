@@ -29,13 +29,48 @@ CREATE TABLE IF NOT EXISTS public.agendas (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
--- 3. Mengaktifkan Row Level Security (RLS)
+-- 3. Tabel Reminders (Cross-Device Personal Reminders)
+CREATE TABLE IF NOT EXISTS public.reminders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  time TEXT NOT NULL,
+  frequency TEXT DEFAULT 'daily' NOT NULL,
+  sound TEXT DEFAULT 'default',
+  is_active BOOLEAN DEFAULT true NOT NULL,
+  days_of_week INTEGER[],
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 4. Tabel Push Subscribers (Web Push Notifications)
+CREATE TABLE IF NOT EXISTS public.push_subscribers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  endpoint TEXT NOT NULL UNIQUE,
+  subscription JSONB NOT NULL,
+  reminders JSONB,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+-- 5. Mengaktifkan Row Level Security (RLS)
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agendas ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.reminders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.push_subscribers ENABLE ROW LEVEL SECURITY;
 
--- 4. RLS Policy untuk Profiles
+-- 6. RLS Policies
 CREATE POLICY "User can view own profile" ON public.profiles FOR SELECT USING ( auth.uid() = id );
 CREATE POLICY "User can update own profile" ON public.profiles FOR UPDATE USING ( auth.uid() = id );
+
+CREATE POLICY "Users can manage own agendas" ON public.agendas FOR ALL 
+USING ( auth.uid() = user_id ) WITH CHECK ( auth.uid() = user_id );
+
+CREATE POLICY "Users can manage own reminders" ON public.reminders FOR ALL 
+USING ( auth.uid() = user_id ) WITH CHECK ( auth.uid() = user_id );
+
+CREATE POLICY "Anyone can register push subscriptions" ON public.push_subscribers FOR ALL 
+USING ( true ) WITH CHECK ( true );
 
 -- Trigger agar user auth otomatis masuk ke tb profiles
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -55,26 +90,7 @@ CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
 
--- 5. RLS Policy untuk Agendas
--- Hanya mengizinkan user mengakses/mengelola data miliknya sendiri. Session tanpa login (auth.uid() is null) akan otomatis ditolak.
-CREATE POLICY "Users can manage own agendas" 
-ON public.agendas FOR ALL 
-USING ( 
-  auth.uid() = user_id AND 
-  EXISTS (
-    SELECT 1 FROM public.profiles 
-    WHERE id = auth.uid() AND status = 'approved'
-  )
-)
-WITH CHECK ( 
-  auth.uid() = user_id AND 
-  EXISTS (
-    SELECT 1 FROM public.profiles 
-    WHERE id = auth.uid() AND status = 'approved'
-  )
-);
-
--- 6. Tabel App Settings
+-- 7. Tabel App Settings
 CREATE TABLE IF NOT EXISTS public.app_settings (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL UNIQUE,
@@ -94,7 +110,7 @@ ON public.app_settings FOR ALL
 USING ( auth.uid() = user_id )
 WITH CHECK ( auth.uid() = user_id );
 
--- 7. Trigger Settings Otomatis
+-- Trigger Settings Otomatis
 CREATE OR REPLACE FUNCTION public.handle_new_user_settings()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -111,23 +127,3 @@ DROP TRIGGER IF EXISTS on_auth_user_created_settings ON auth.users;
 CREATE TRIGGER on_auth_user_created_settings
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user_settings();
-
--- =========================================================================
--- MIGRATION NOTES (Jalankan di SQL Editor Supabase jika tabel sudah dibuat sebelumnya)
--- =========================================================================
---
--- 1. Tambah kolom updated_at ke tabel agendas jika belum ada:
--- ALTER TABLE public.agendas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL;
---
--- 2. Menjadikan user tertentu sebagai admin & disetujui (opsional, ganti email dengan milik Anda):
--- UPDATE public.profiles SET role = 'admin', status = 'approved' WHERE email = 'admin@domain.com';
---
--- 3. Menambahkan kolom baru untuk fitur Multi-Hari & Reminders:
--- ALTER TABLE public.agendas ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'confirmed';
--- ALTER TABLE agendas ADD COLUMN "privateNotes" TEXT;
--- ALTER TABLE agendas ADD COLUMN "isShareable" BOOLEAN DEFAULT true;
--- ALTER TABLE agendas ADD COLUMN "groupId" UUID;
--- ALTER TABLE agendas ADD COLUMN "isOnline" BOOLEAN DEFAULT false;
--- ALTER TABLE agendas ADD COLUMN "onlineLink" TEXT;
--- ALTER TABLE agendas ADD COLUMN "meetingId" TEXT;
--- ALTER TABLE agendas ADD COLUMN "meetingPasscode" TEXT;

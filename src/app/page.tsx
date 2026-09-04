@@ -3,7 +3,7 @@
 import { useStore, Agenda } from "@/store/useStore";
 import { format, isSameDay } from "date-fns";
 import { id } from "date-fns/locale";
-import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing } from "lucide-react";
+import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing, Menu } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
 import Swal from "sweetalert2";
@@ -28,6 +28,7 @@ export default function Dashboard() {
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [isUnscheduledDrawerOpen, setIsUnscheduledDrawerOpen] = useState(false);
+  const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
 
   const { agendas, sharedDates, toggleComplete, deleteAgenda, markAsShared, isLoading, error, fetchAgendas } = useStore();
 
@@ -219,63 +220,102 @@ export default function Dashboard() {
         
         {/* Left Column: Navigation & Calendar (Control Center) */}
         <aside className="w-full lg:w-[400px] shrink-0 flex flex-col gap-6">
-          <header className="flex flex-col gap-6">
+          <header className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {appSettings?.app_logo ? (
-                  <img src={appSettings.app_logo} alt="Logo" className="w-12 h-12 rounded-2xl shadow-lg object-cover bg-white/5" />
+                  <img src={appSettings.app_logo} alt="Logo" className="w-11 h-11 rounded-2xl shadow-lg object-cover bg-white/5" />
                 ) : (
                   <div className="p-2.5 bg-gradient-to-tr from-purple-500 to-indigo-500 rounded-2xl shadow-lg shadow-purple-500/20">
                     <CalendarHeart className="w-6 h-6 text-white" />
                   </div>
                 )}
                 <div>
-                  <h1 className="text-xl font-bold text-white">
+                  <h1 className="text-lg font-bold text-white leading-tight">
                     {appSettings?.app_name || "AgendaRecap Pro"}
                   </h1>
-                  <p className="text-xs text-zinc-400 font-medium tracking-wide">PRIVATE DASHBOARD</p>
+                  <p className="text-[10px] text-zinc-400 font-medium tracking-wide">PRIVATE DASHBOARD</p>
                 </div>
+              </div>
+
+              {/* System Menu Button (Hamburger on Mobile / Dropdown on PC) */}
+              <div className="relative">
+                <button
+                  onClick={() => setIsSystemMenuOpen(!isSystemMenuOpen)}
+                  className="p-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all text-zinc-300 hover:text-white flex items-center gap-2 active:scale-95 shadow-md"
+                  title="Menu Sistem & Pengaturan"
+                >
+                  {isSystemMenuOpen ? <X className="w-5 h-5 text-purple-400" /> : <Menu className="w-5 h-5 text-zinc-300" />}
+                </button>
+
+                <AnimatePresence>
+                  {isSystemMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setIsSystemMenuOpen(false)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        transition={{ duration: 0.15 }}
+                        className="absolute right-0 mt-2 w-56 bg-[#18181b] border border-white/10 rounded-2xl shadow-2xl z-50 overflow-hidden py-2 backdrop-blur-xl"
+                      >
+                        <div className="px-3 py-1.5 text-[10px] font-bold text-zinc-500 uppercase tracking-wider border-b border-white/5 mb-1">
+                          Menu Sistem
+                        </div>
+
+                        <Link
+                          href="/admin"
+                          onClick={() => setIsSystemMenuOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2.5 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors font-medium"
+                        >
+                          <Shield className="w-4 h-4 text-blue-400" />
+                          <span>Kelola User (Admin)</span>
+                        </Link>
+
+                        <Link
+                          href="/settings"
+                          onClick={() => setIsSystemMenuOpen(false)}
+                          className="flex items-center gap-3 px-3 py-2.5 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors font-medium"
+                        >
+                          <Settings className="w-4 h-4 text-purple-400" />
+                          <span>Pengaturan Aplikasi</span>
+                        </Link>
+
+                        <div className="border-t border-white/5 my-1" />
+
+                        <button
+                          onClick={() => {
+                            setIsSystemMenuOpen(false);
+                            logout();
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors font-medium text-left"
+                        >
+                          <LogOut className="w-4 h-4 text-red-400" />
+                          <span>Keluar dari Akun</span>
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
             
-            <div className="flex flex-col gap-2">
-              <Link 
-                href="/admin"
-                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition-colors text-zinc-300 hover:text-white"
-              >
-                <Shield className="w-5 h-5 text-blue-400" />
-                <span className="font-medium text-sm">Kelola User (Admin)</span>
-              </Link>
-              <Link 
-                href="/settings"
-                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition-colors text-zinc-300 hover:text-white"
-              >
-                <Settings className="w-5 h-5 text-purple-400" />
-                <span className="font-medium text-sm">Pengaturan Aplikasi</span>
-              </Link>
+            {/* Primary Quick Actions Bar (Frequently Used) */}
+            <div className="grid grid-cols-2 gap-2">
               <Link 
                 href="/consultation"
-                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition-colors text-zinc-300 hover:text-white relative overflow-hidden group"
+                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-xl transition-all text-orange-200 hover:text-white group text-xs font-semibold"
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-orange-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <Shield className="w-5 h-5 text-orange-400" />
-                <span className="font-medium text-sm text-orange-50/90 group-hover:text-white">Mode Konsultasi</span>
+                <Shield className="w-4 h-4 text-orange-400 shrink-0" />
+                <span>Konsultasi</span>
               </Link>
               <Link 
                 href="/reminders"
-                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl transition-colors text-zinc-300 hover:text-white relative overflow-hidden group"
+                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl transition-all text-blue-200 hover:text-white group text-xs font-semibold"
               >
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <BellRing className="w-5 h-5 text-blue-400" />
-                <span className="font-medium text-sm text-blue-50/90 group-hover:text-white">Pengingat Pribadi</span>
+                <BellRing className="w-4 h-4 text-blue-400 shrink-0" />
+                <span>Pengingat</span>
               </Link>
-              <button 
-                onClick={() => logout()}
-                className="flex items-center gap-3 px-4 py-3 bg-white/5 hover:bg-red-400/10 border border-white/5 rounded-xl transition-colors text-zinc-400 hover:text-red-400"
-              >
-                <LogOut className="w-5 h-5" />
-                <span className="font-medium text-sm">Keluar dari Akun</span>
-              </button>
             </div>
           </header>
 

@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import { useReminderStore } from "@/store/useReminderStore";
-
 import Swal from 'sweetalert2';
 
 function playSound(type: string) {
@@ -52,10 +51,13 @@ function playSound(type: string) {
 }
 
 export default function ReminderNotifier() {
-  const { reminders } = useReminderStore();
+  const { reminders, fetchReminders } = useReminderStore();
 
   useEffect(() => {
-    // Request permission if not already handled elsewhere (optional here, usually in the page)
+    fetchReminders();
+  }, [fetchReminders]);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       const currentHHmm = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -103,7 +105,7 @@ export default function ReminderNotifier() {
             playSound(r.sound || 'default');
           }
 
-          // Sticky in-app modal to ensure it's not missed
+          // Sticky in-app modal to ensure it's not missed when foreground
           Swal.fire({
             title: r.title,
             text: `Waktu pengingat Anda (${r.time}) telah tiba!`,
