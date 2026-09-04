@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "postinstall": "npm rebuild sharp unrs-resolver || true"
+    "lint": "eslint"
   },
   "dependencies": {
     "@supabase/ssr": "^0.9.0",

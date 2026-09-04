@@ -1,22 +1,19 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Using service role key for direct DB access
-);
-
 export async function POST(request: Request) {
   try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+    
+    const supabase = createClient(supabaseUrl, serviceKey);
+
     const { subscription, reminders } = await request.json();
     
     if (!subscription || !subscription.endpoint) {
       return NextResponse.json({ error: 'Missing subscription endpoint' }, { status: 400 });
     }
 
-    // Get the user's timezone offset from frontend to calculate accurate push times later
-    // Alternatively, we can calculate everything in frontend, but backend needs to know it.
-    // For now, let's just save it.
     const { error } = await supabase
       .from('push_subscribers')
       .upsert({ 
@@ -26,7 +23,6 @@ export async function POST(request: Request) {
       });
 
     if (error) {
-      // If table doesn't exist yet, we catch and return gracefully so frontend doesn't crash
       console.error("Supabase upsert error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
