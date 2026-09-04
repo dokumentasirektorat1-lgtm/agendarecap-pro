@@ -28,11 +28,26 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
   const [isWatermark, setIsWatermark] = useState(initialSettings?.is_watermark_enabled ?? true);
   const [watermarkText, setWatermarkText] = useState(initialSettings?.watermark_text || "Dibuat oleh AgendaRecap Pro");
   
-  // Reorder state
-  const orderIds = initialSettings?.share_order || ["title", "time", "location"];
-  const [shareOrder, setShareOrder] = useState(() => 
-    orderIds.map((id) => defaultShareOrder.find((s) => s.id === id) || { id, label: id })
-  );
+  // Reorder state safely formatted
+  const rawOrder = initialSettings?.share_order;
+  const orderIds = Array.isArray(rawOrder) 
+    ? rawOrder.filter((id): id is string => typeof id === "string")
+    : ["title", "time", "location"];
+
+  const [shareOrder, setShareOrder] = useState(() => {
+    const matched = orderIds
+      .map((id) => defaultShareOrder.find((s) => s.id === id))
+      .filter((item): item is { id: string; label: string } => Boolean(item));
+    
+    // Ensure all default items are present
+    defaultShareOrder.forEach(def => {
+      if (!matched.some(m => m.id === def.id)) {
+        matched.push(def);
+      }
+    });
+
+    return matched;
+  });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

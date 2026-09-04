@@ -57,6 +57,27 @@ export default function ReminderNotifier() {
     fetchReminders();
   }, [fetchReminders]);
 
+  // Sync active reminders to Service Worker for OFFLINE & Closed-App background delivery
+  useEffect(() => {
+    if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((reg) => {
+        if (reg.active) {
+          reg.active.postMessage({
+            type: 'SYNC_REMINDERS',
+            reminders
+          });
+        }
+      });
+      if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SYNC_REMINDERS',
+          reminders
+        });
+      }
+    }
+  }, [reminders]);
+
+  // Foreground tab timer check
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -105,7 +126,7 @@ export default function ReminderNotifier() {
             playSound(r.sound || 'default');
           }
 
-          // Sticky in-app modal to ensure it's not missed when foreground
+          // Sticky in-app modal when foreground
           Swal.fire({
             title: r.title,
             text: `Waktu pengingat Anda (${r.time}) telah tiba!`,

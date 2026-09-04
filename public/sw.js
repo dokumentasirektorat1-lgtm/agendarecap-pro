@@ -1,3 +1,6 @@
+// Service Worker for AgendaRecap Pro
+// Offline Background Notifications & Web Push Engine
+
 self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
@@ -6,7 +9,63 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(self.clients.claim());
 });
 
-// Handle incoming Web Push from Server (VAPID / FCM)
+// Cache for offline reminders
+let cachedReminders = [];
+let firedRemindersMap = {};
+
+// Background Offline Timer (Runs every 25 seconds)
+setInterval(() => {
+  if (!cachedReminders || cachedReminders.length === 0) return;
+
+  const now = new Date();
+  const currentHHmm = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+  const dayOfWeek = now.getDay();
+
+  cachedReminders.forEach((r) => {
+    if (!r.isActive) return;
+    if (r.time !== currentHHmm) return;
+
+    let shouldNotify = false;
+    if (r.frequency === 'once') {
+      const createdDate = new Date(r.createdAt).toDateString();
+      if (createdDate === now.toDateString()) {
+        shouldNotify = true;
+      }
+    } else if (r.frequency === 'daily') {
+      shouldNotify = true;
+    } else if (r.frequency === 'weekdays' && dayOfWeek !== 0 && dayOfWeek !== 6) {
+      shouldNotify = true;
+    } else if (r.frequency === 'weekly' && r.daysOfWeek && r.daysOfWeek.includes(dayOfWeek)) {
+      shouldNotify = true;
+    }
+
+    if (shouldNotify) {
+      const fireKey = `${r.id}_${now.toDateString()}_${currentHHmm}`;
+      if (firedRemindersMap[fireKey]) return; // Prevent duplicate popup in the same minute
+
+      firedRemindersMap[fireKey] = true;
+
+      const options = {
+        body: `Waktu pengingat Anda (${r.time}) telah tiba! (Mode Offline / Background)`,
+        icon: '/icon-192x192.png',
+        badge: '/icon-192x192.png',
+        tag: `reminder-offline-${r.id}`,
+        requireInteraction: true, // STICKY POPUP ON PC & ANDROID OS
+        renotify: true,
+        vibrate: [300, 100, 300, 100, 300, 100, 300],
+        data: '/',
+        actions: [
+          { action: 'open', title: 'Buka Agenda' },
+          { action: 'close', title: 'Selesai' }
+        ]
+      };
+
+      self.registration.showNotification(r.title, options);
+    }
+  });
+}, 25000);
+
+// Handle Online Server Push Events (VAPID / FCM)
 self.addEventListener('push', (event) => {
   let data = {};
   try {
@@ -21,9 +80,9 @@ self.addEventListener('push', (event) => {
     icon: '/icon-192x192.png',
     badge: '/icon-192x192.png',
     data: data.url || '/',
-    tag: data.tag || `reminder-${Date.now()}`,
+    tag: data.tag || `reminder-push-${Date.now()}`,
     renotify: true,
-    requireInteraction: true, // Forces notification to stay visible on PC / Android until clicked
+    requireInteraction: true,
     vibrate: [300, 100, 300, 100, 300, 100, 300],
     actions: [
       { action: 'open', title: 'Buka Agenda' },
@@ -56,9 +115,15 @@ self.addEventListener('notificationclick', (event) => {
   }
 });
 
-// Background Timer & Test Push Messages via PostMessage
+// Handle Messages from Client Web App
 self.addEventListener('message', (event) => {
   if (!event.data) return;
+
+  if (event.data.type === 'SYNC_REMINDERS') {
+    if (Array.isArray(event.data.reminders)) {
+      cachedReminders = event.data.reminders;
+    }
+  }
 
   if (event.data.type === 'TEST_BACKGROUND_PUSH') {
     const delay = event.data.delayMs || 5000;
