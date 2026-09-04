@@ -3,6 +3,14 @@ import { createClient } from '@supabase/supabase-js';
 import webpush from 'web-push';
 
 export async function GET(request: Request) {
+  return handleCronJob();
+}
+
+export async function POST(request: Request) {
+  return handleCronJob();
+}
+
+async function handleCronJob() {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
@@ -28,11 +36,12 @@ export async function GET(request: Request) {
       .from('push_subscribers')
       .select('*');
 
-    if (error || !subscribers) {
-      return NextResponse.json({ error: error?.message || "No subscribers or table missing" }, { status: 200 });
+    if (error || !subscribers || subscribers.length === 0) {
+      return NextResponse.json({ success: true, message: "No subscribers found or table empty" }, { status: 200 });
     }
 
     const now = new Date();
+    // WIB / WITA / WIT local time offset handling (Default GMT+7 for Indonesia)
     const gmt7Time = new Date(now.getTime() + (7 * 60 * 60 * 1000));
     const currentHHmm = `${gmt7Time.getUTCHours().toString().padStart(2, '0')}:${gmt7Time.getUTCMinutes().toString().padStart(2, '0')}`;
     const dayOfWeek = gmt7Time.getUTCDay();
@@ -66,7 +75,7 @@ export async function GET(request: Request) {
               sub.subscription,
               JSON.stringify({
                 title: r.title,
-                body: "Pengingat Personal AgendaRecap (Server Push)",
+                body: `Waktu pengingat Anda (${r.time}) telah tiba!`,
                 url: "/"
               })
             ).catch(err => {
@@ -81,7 +90,7 @@ export async function GET(request: Request) {
 
     await Promise.all(pushPromises);
     
-    return NextResponse.json({ success: true, processed: pushPromises.length });
+    return NextResponse.json({ success: true, processed: pushPromises.length, timeChecked: currentHHmm });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

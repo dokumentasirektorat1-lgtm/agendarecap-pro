@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useReminderStore, Reminder, Frequency } from "@/store/useReminderStore";
-import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Monitor, WifiOff } from "lucide-react";
+import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Monitor, WifiOff, Send } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
@@ -150,50 +150,54 @@ export default function RemindersPage() {
     }
   };
 
-  const testBackgroundNotification = async () => {
+  const testServerCloudPush = async () => {
     if (permission !== 'granted') {
       await requestPermission();
     }
-    
-    let sent = false;
-    if ('serviceWorker' in navigator) {
-      const reg = await navigator.serviceWorker.ready;
-      if (reg.active) {
-        reg.active.postMessage({
-          type: 'TEST_BACKGROUND_PUSH',
-          delayMs: 5000,
-          title: '🔔 Uji Notifikasi App Tertutup & Offline (5 Detik)',
-          body: 'Notifikasi ini terpicu otomatis saat aplikasi tertutup (Background SW Ready).'
-        });
-        sent = true;
-      }
-    }
-    
-    if (!sent && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'TEST_BACKGROUND_PUSH',
-        delayMs: 5000,
-        title: '🔔 Uji Notifikasi App Tertutup & Offline (5 Detik)',
-        body: 'Notifikasi ini terpicu otomatis saat aplikasi tertutup (Background SW Active).'
-      });
-      sent = true;
-    }
 
-    if (sent) {
-      Swal.fire({
-        title: 'Tutup Tab Ini Sekarang!',
-        text: 'Notifikasi akan muncul dalam 5 detik di perangkat ini (PC/Android) meskipun tab/aplikasi sudah ditutup atau sedang offline.',
-        icon: 'info',
-        confirmButtonText: 'Siap, Tutup Tab',
-        timer: 4000
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let subscription = await reg.pushManager.getSubscription();
+
+      if (!subscription) {
+        const VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+        if (!VAPID_KEY) {
+          Swal.fire({ icon: 'error', title: 'VAPID Key Belum Ada', text: 'Variabel NEXT_PUBLIC_VAPID_PUBLIC_KEY belum dikonfigurasi di Vercel.' });
+          return;
+        }
+        const urlBase64ToUint8Array = (base64String: string) => {
+          const padding = '='.repeat((4 - base64String.length % 4) % 4);
+          const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+          const rawData = window.atob(base64);
+          const outputArray = new Uint8Array(rawData.length);
+          for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+          return outputArray;
+        };
+        subscription = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_KEY)
+        });
+      }
+
+      const res = await fetch('/api/push/send-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subscription, delayMs: 5000 })
       });
-    } else {
-      Swal.fire({
-        icon: 'warning',
-        title: 'Service Worker Diaktifkan',
-        text: 'Melakukan registrasi Service Worker. Silakan tekan tombol uji coba sekali lagi.'
-      });
-      navigator.serviceWorker.register('/sw.js').then(() => setSwActive(true));
+
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire({
+          title: 'Tutup Tab Sekarang!',
+          text: 'Server Vercel akan mengirimkan Cloud Push melalui Google FCM dalam 5 detik. Tutup tab ini sekarang untuk membuktikannya!',
+          icon: 'success',
+          confirmButtonText: 'Siap, Tutup Tab'
+        });
+      } else {
+        Swal.fire({ icon: 'error', title: 'Gagal Cloud Push', text: data.error });
+      }
+    } catch (err: any) {
+      Swal.fire({ icon: 'error', title: 'Error Push', text: err.message });
     }
   };
 
@@ -265,7 +269,7 @@ export default function RemindersPage() {
                 <BellRing className="w-6 h-6 text-blue-400" />
                 Pengingat Pribadi
               </h1>
-              <p className="text-sm text-zinc-400 mt-1">Pengingat aktif saat aplikasi tertutup & bekerja dalam mode OFFLINE</p>
+              <p className="text-sm text-zinc-400 mt-1">Sistem Notifikasi Web Push & Service Worker Background Engine</p>
             </div>
           </div>
           <button
@@ -284,7 +288,7 @@ export default function RemindersPage() {
           <div className="flex items-center justify-between border-b border-white/5 pb-3">
             <div className="flex items-center gap-2">
               <Zap className="w-5 h-5 text-yellow-400" />
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider">Status Notifikasi & Offline SW</h2>
+              <h2 className="text-sm font-bold text-white uppercase tracking-wider">Status Notifikasi & Cloud Push</h2>
             </div>
             <div className="flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${dbSynced ? 'bg-emerald-400 animate-pulse' : 'bg-yellow-400'}`} />
@@ -310,9 +314,9 @@ export default function RemindersPage() {
               </span>
             </div>
             <div className="flex items-center justify-between p-3 bg-white/5 rounded-xl border border-white/5">
-              <span className="text-zinc-400">Mode Offline:</span>
+              <span className="text-zinc-400">Server Cloud Push:</span>
               <span className="font-bold text-blue-400 flex items-center gap-1">
-                <WifiOff className="w-3.5 h-3.5" /> Dukung Offline
+                <Send className="w-3.5 h-3.5" /> Google FCM (VAPID)
               </span>
             </div>
           </div>
@@ -326,10 +330,10 @@ export default function RemindersPage() {
               <Monitor className="w-4 h-4 text-blue-400" /> Uji Popup PC (Sticky Mode)
             </button>
             <button
-              onClick={testBackgroundNotification}
+              onClick={testServerCloudPush}
               className="flex-1 px-4 py-2.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2"
             >
-              <Zap className="w-4 h-4 text-purple-400" /> Uji App Tertutup / Offline (5 Detik)
+              <Send className="w-4 h-4 text-purple-400" /> Uji Cloud Push (Tutup App Now)
             </button>
           </div>
         </div>
