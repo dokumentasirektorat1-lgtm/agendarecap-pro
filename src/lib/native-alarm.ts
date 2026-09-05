@@ -44,7 +44,7 @@ export interface ScheduleNativeAlarmInput {
 
 export function isNativePlatform(): boolean {
   if (typeof window === 'undefined') return false;
-  return Capacitor.isNativePlatform() || (window as any).isAndroidNativeBridge === true;
+  return Capacitor.isNativePlatform() || (window as any).isAndroidNativeBridge === true || (window as any).Capacitor?.isNativePlatform?.() === true;
 }
 
 export function initNativeAlarmListeners(): void {

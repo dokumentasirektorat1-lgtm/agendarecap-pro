@@ -3,7 +3,6 @@ package com.agendarecap.app;
 import android.os.Bundle;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -22,26 +21,6 @@ public class MainActivity extends BridgeActivity {
             settings.setAllowContentAccess(true);
             settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-
-            webView.setWebViewClient(new WebViewClient() {
-                @Override
-                public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                    if (failingUrl != null && failingUrl.startsWith("http")) {
-                        view.loadUrl("https://agendarecap.vercel.app");
-                    }
-                }
-            });
-        }
-    }
-
-    @Override
-    public void onBackPressed() {
-        WebView webView = this.bridge.getWebView();
-        if (webView != null && webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            super.onBackPressed();
-            finish();
         }
     }
 }

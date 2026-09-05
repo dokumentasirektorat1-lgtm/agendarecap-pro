@@ -7,7 +7,11 @@ const config: CapacitorConfig = {
   server: {
     url: 'https://agendarecap.vercel.app',
     cleartext: true,
-    errorPath: 'index.html',
+    allowNavigation: [
+      'agendarecap.vercel.app',
+      '*.vercel.app',
+      '*.supabase.co'
+    ]
   },
   plugins: {
     LocalNotifications: {
