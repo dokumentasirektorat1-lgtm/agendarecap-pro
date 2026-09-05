@@ -31,6 +31,17 @@ CREATE TABLE IF NOT EXISTS reminders (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Ensure all columns exist even if reminders table already existed previously
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS body TEXT DEFAULT '';
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS time TEXT DEFAULT '08:00';
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'Asia/Jakarta';
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS frequency TEXT DEFAULT 'once';
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS days_of_week INT[];
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS sound TEXT DEFAULT 'default';
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true;
+ALTER TABLE reminders ADD COLUMN IF NOT EXISTS delivery_mode TEXT DEFAULT 'hybrid';
+
 -- 3. Create `reminder_occurrences` table (Individual Executions / Trigger Points)
 CREATE TABLE IF NOT EXISTS reminder_occurrences (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
