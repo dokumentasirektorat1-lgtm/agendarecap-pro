@@ -84,15 +84,15 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 // ==========================================
-// REMINDERS OPERATIONAL API
+// REMINDERS OPERATIONAL API (MERGE/UPSERT STRATEGY)
 // ==========================================
 
 export async function saveRemindersToIDB(reminders: IDBReminder[]): Promise<void> {
+  if (!reminders || reminders.length === 0) return; // Never wipe local IDB if server returns []
   try {
     const db = await openDB();
     const tx = db.transaction('reminders', 'readwrite');
     const store = tx.objectStore('reminders');
-    store.clear();
     for (const item of reminders) {
       store.put(item);
     }
@@ -165,6 +165,7 @@ export async function deleteReminderFromIDB(id: string): Promise<void> {
 // ==========================================
 
 export async function saveOccurrencesToIDB(occurrences: IDBOccurrence[]): Promise<void> {
+  if (!occurrences || occurrences.length === 0) return;
   try {
     const db = await openDB();
     const tx = db.transaction('occurrences', 'readwrite');

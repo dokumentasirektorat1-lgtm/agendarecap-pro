@@ -1,7 +1,7 @@
 // Offline Sync Engine for Agendaku PWA
-// Reconciles local IndexedDB offline queue with Supabase server
+// Reconciles local IndexedDB offline queue with Supabase server via Union Merge Strategy
 
-import { getOfflineQueue, removeFromOfflineQueue, saveRemindersToIDB, saveOccurrencesToIDB, IDBReminder, IDBOccurrence } from '@/lib/idb';
+import { getOfflineQueue, removeFromOfflineQueue, getRemindersFromIDB, getOccurrencesFromIDB, saveRemindersToIDB, saveOccurrencesToIDB, IDBReminder, IDBOccurrence } from '@/lib/idb';
 
 let isSyncingInProgress = false;
 
@@ -76,50 +76,65 @@ export async function runSyncEngine(): Promise<{ success: boolean; syncedCount: 
       }
     }
 
-    // 2. Fetch Canonical Dataset from Server (Reconciliation & Cache Replacement)
+    // 2. Union Merge Strategy with Server Data
     const serverRes = await fetch('/api/reminders', { cache: 'no-store' });
     if (serverRes.ok) {
       const serverData = await serverRes.json();
-      if (serverData.reminders && Array.isArray(serverData.reminders)) {
-        const canonicalReminders: IDBReminder[] = serverData.reminders.map((r: any) => ({
-          id: r.id,
-          user_id: r.user_id,
-          title: r.title,
-          body: r.body,
-          time: r.time || '08:00',
-          timezone: r.timezone || 'Asia/Jakarta',
-          frequency: r.frequency || 'once',
-          daysOfWeek: r.days_of_week,
-          sound: r.sound || 'default',
-          isActive: r.is_active !== undefined ? r.is_active : true,
-          deliveryMode: r.delivery_mode || 'hybrid',
-          createdAt: r.created_at || new Date().toISOString(),
-          updatedAt: r.updated_at
-        }));
+      const localReminders = await getRemindersFromIDB();
+      const localOccurrences = await getOccurrencesFromIDB();
 
-        await saveRemindersToIDB(canonicalReminders);
+      const reminderMap = new Map<string, IDBReminder>();
+      localReminders.forEach(r => reminderMap.set(r.id, r));
+
+      if (serverData.reminders && Array.isArray(serverData.reminders)) {
+        serverData.reminders.forEach((r: any) => {
+          reminderMap.set(r.id, {
+            id: r.id,
+            user_id: r.user_id,
+            title: r.title,
+            body: r.body,
+            time: r.time || '08:00',
+            timezone: r.timezone || 'Asia/Jakarta',
+            frequency: r.frequency || 'once',
+            daysOfWeek: r.days_of_week,
+            sound: r.sound || 'default',
+            isActive: r.is_active !== undefined ? r.is_active : true,
+            deliveryMode: r.delivery_mode || 'hybrid',
+            createdAt: r.created_at || new Date().toISOString(),
+            updatedAt: r.updated_at
+          });
+        });
       }
+
+      const mergedReminders = Array.from(reminderMap.values());
+      await saveRemindersToIDB(mergedReminders);
+
+      const occurrenceMap = new Map<string, IDBOccurrence>();
+      localOccurrences.forEach(o => occurrenceMap.set(o.id, o));
 
       if (serverData.occurrences && Array.isArray(serverData.occurrences)) {
-        const canonicalOccurrences: IDBOccurrence[] = serverData.occurrences.map((o: any) => ({
-          id: o.id,
-          reminderId: o.reminder_id,
-          user_id: o.user_id,
-          scheduledAt: o.scheduled_at,
-          status: o.status,
-          snoozedUntil: o.snoozed_until,
-          sentAt: o.sent_at,
-          completedAt: o.completed_at,
-          dismissedAt: o.dismissed_at,
-          notificationTag: o.notification_tag || `reminder-${o.reminder_id}-occurrence-${o.id}`,
-          createdAt: o.created_at,
-          updatedAt: o.updated_at
-        }));
-
-        await saveOccurrencesToIDB(canonicalOccurrences);
+        serverData.occurrences.forEach((o: any) => {
+          occurrenceMap.set(o.id, {
+            id: o.id,
+            reminderId: o.reminder_id,
+            user_id: o.user_id,
+            scheduledAt: o.scheduled_at,
+            status: o.status,
+            snoozedUntil: o.snoozed_until,
+            sentAt: o.sent_at,
+            completedAt: o.completed_at,
+            dismissedAt: o.dismissed_at,
+            notificationTag: o.notification_tag || `reminder-${o.reminder_id}-occurrence-${o.id}`,
+            createdAt: o.created_at,
+            updatedAt: o.updated_at
+          });
+        });
       }
 
-      console.log('[SYNC] Canonical dataset replaced in IndexedDB successfully.');
+      const mergedOccurrences = Array.from(occurrenceMap.values());
+      await saveOccurrencesToIDB(mergedOccurrences);
+
+      console.log(`[SYNC] Reconciliation complete: Total Reminders=${mergedReminders.length}, Total Occurrences=${mergedOccurrences.length}`);
     }
   } catch (err: any) {
     console.error('[SYNC] Global sync engine error:', err);

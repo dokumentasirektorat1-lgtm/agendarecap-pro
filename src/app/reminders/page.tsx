@@ -3,13 +3,13 @@
 import { useState, useEffect } from "react";
 import { useReminderStore, Frequency, ReminderItem } from "@/store/useReminderStore";
 import { getUTCISOFromLocal, formatLocalFromUTC } from "@/lib/timezone";
-import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Monitor, Send, Check, BellOff, Terminal, Wifi, Smartphone } from "lucide-react";
+import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Send, Check, BellOff, Terminal, Play } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 
 export default function RemindersPage() {
-  const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
+  const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
 
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -26,6 +26,7 @@ export default function RemindersPage() {
   const [swActive, setSwActive] = useState(false);
   const [subscriptionActive, setSubscriptionActive] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isTestingCron, setIsTestingCron] = useState(false);
 
   useEffect(() => {
     fetchReminders();
@@ -103,19 +104,6 @@ export default function RemindersPage() {
     }
   }, [permission]);
 
-  const requestPermission = async () => {
-    if (!('Notification' in window)) {
-      Swal.fire({ icon: 'error', title: 'Tidak Didukung', text: 'Browser tidak mendukung Notifikasi Desktop/PWA.' });
-      return;
-    }
-    const result = await Notification.requestPermission();
-    setPermission(result);
-    if (result === 'granted') {
-      await syncPushSubscription(true);
-      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Notifikasi Web Push Diaktifkan!', showConfirmButton: false, timer: 2000 });
-    }
-  };
-
   const handleManualSync = async () => {
     setIsSyncing(true);
     await triggerSync();
@@ -130,25 +118,75 @@ export default function RemindersPage() {
     });
   };
 
-  const handleAddOrUpdate = (e: React.FormEvent) => {
+  const handleTriggerCronServer = async () => {
+    setIsTestingCron(true);
+    try {
+      const res = await fetch('/api/cron/reminders');
+      const data = await res.json();
+      await fetchReminders();
+      Swal.fire({
+        icon: res.ok ? 'success' : 'info',
+        title: 'Eksekusi Scheduler Server',
+        text: `Status: ${data.message || JSON.stringify(data)}`,
+        timer: 3000
+      });
+    } catch (err: any) {
+      Swal.fire({ icon: 'error', title: 'Gagal Trigger Cron', text: err.message });
+    } finally {
+      setIsTestingCron(false);
+    }
+  };
+
+  const handleEdit = (reminder: ReminderItem) => {
+    setEditingId(reminder.id);
+    setTitle(reminder.title);
+    setBodyText(reminder.body || "");
+    setTime(reminder.time || "08:00");
+    if (reminder.currentOccurrence?.scheduledAt) {
+      const localIso = formatLocalFromUTC(reminder.currentOccurrence.scheduledAt, reminder.timezone);
+      const datePart = localIso.split(" ")[0];
+      if (datePart && datePart.includes("-")) {
+        setScheduledDate(datePart);
+      }
+    }
+    setFrequency(reminder.frequency || "once");
+    setSound(reminder.sound || "default");
+    setIsAdding(true);
+  };
+
+  const handleAddOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title) return;
 
     const scheduledAtISO = getUTCISOFromLocal(scheduledDate, time, timezone);
 
-    addReminder({
-      title,
-      body: bodyText,
-      time,
-      scheduledDate,
-      scheduledAt: scheduledAtISO,
-      timezone,
-      frequency,
-      sound,
-      daysOfWeek: frequency === 'weekly' ? [new Date(scheduledDate).getDay()] : undefined
-    });
+    if (editingId) {
+      await updateReminder(editingId, {
+        title,
+        body: bodyText,
+        time,
+        scheduledDate,
+        timezone,
+        frequency,
+        sound,
+        daysOfWeek: frequency === 'weekly' ? [new Date(scheduledDate).getDay()] : undefined
+      });
+      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Diperbarui & Diunggah', showConfirmButton: false, timer: 1500 });
+    } else {
+      await addReminder({
+        title,
+        body: bodyText,
+        time,
+        scheduledDate,
+        scheduledAt: scheduledAtISO,
+        timezone,
+        frequency,
+        sound,
+        daysOfWeek: frequency === 'weekly' ? [new Date(scheduledDate).getDay()] : undefined
+      });
+      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Dijadwalkan & Diunggah', showConfirmButton: false, timer: 1500 });
+    }
 
-    Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Pengingat Dijadwalkan', showConfirmButton: false, timer: 1500 });
     resetForm();
   };
 
@@ -184,7 +222,7 @@ export default function RemindersPage() {
       <div className="relative z-10 max-w-5xl mx-auto p-4 sm:p-8 flex flex-col gap-6">
         
         {/* Navigation & Header */}
-        <header className="flex items-center justify-between glass p-4 sm:p-6 rounded-[2rem] border border-blue-500/15 shadow-2xl">
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between glass p-4 sm:p-6 rounded-[2rem] border border-blue-500/15 shadow-2xl gap-4">
           <div className="flex items-center gap-4">
             <Link 
               href="/"
@@ -201,10 +239,20 @@ export default function RemindersPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <button
+              onClick={handleTriggerCronServer}
+              disabled={isTestingCron}
+              className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
+              title="Manual Trigger Scheduler Server"
+            >
+              <Play className={`w-4 h-4 ${isTestingCron ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Cek Jam Jatuh Tempo</span>
+            </button>
+
             <Link
               href="/diagnostics"
-              className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
+              className="p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-xl transition-all text-blue-300 flex items-center gap-2 text-xs font-bold"
               title="Open Diagnostics Page"
             >
               <Terminal className="w-4 h-4" />
@@ -214,7 +262,7 @@ export default function RemindersPage() {
             <button
               onClick={handleManualSync}
               disabled={isSyncing}
-              className="p-3 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded-xl transition-all text-blue-400 hover:text-blue-300 flex items-center gap-2 text-xs font-semibold"
+              className="p-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl transition-all text-white flex items-center gap-2 text-xs font-semibold"
               title="Sync local queue with Supabase"
             >
               <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
@@ -233,7 +281,7 @@ export default function RemindersPage() {
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${!isOffline ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
               <span className="text-xs text-zinc-400 font-semibold">
-                {!isOffline ? 'Online (Supabase Server Sync)' : 'Offline (IndexedDB Local Replica)'}
+                {!isOffline ? 'Online (Supabase Server Sync Active)' : 'Offline (IndexedDB Local Replica)'}
               </span>
             </div>
           </div>
@@ -295,14 +343,17 @@ export default function RemindersPage() {
           </div>
 
           <button
-            onClick={() => setIsAdding(!isAdding)}
+            onClick={() => {
+              if (isAdding && editingId) resetForm();
+              else setIsAdding(!isAdding);
+            }}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-500/25 font-bold text-xs transition-all"
           >
-            <Plus className="w-4 h-4" /> Buat Pengingat Baru
+            <Plus className="w-4 h-4" /> {isAdding && editingId ? 'Batal Edit' : 'Buat Pengingat Baru'}
           </button>
         </div>
 
-        {/* Add Form Drawer */}
+        {/* Add / Edit Form Drawer */}
         <AnimatePresence>
           {isAdding && (
             <motion.form
@@ -314,7 +365,7 @@ export default function RemindersPage() {
             >
               <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
                 <Bell className="w-5 h-5 text-blue-400" />
-                Buat Catatan & Pengingat Alarm
+                {editingId ? 'Edit Catatan & Pengingat Alarm' : 'Buat Catatan & Pengingat Alarm'}
               </h3>
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -383,7 +434,7 @@ export default function RemindersPage() {
                   Batal
                 </button>
                 <button type="submit" className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-xl text-xs transition-colors shadow-lg shadow-blue-500/20">
-                  Jadwalkan Pengingat
+                  {editingId ? 'Simpan Perubahan' : 'Jadwalkan & Upload'}
                 </button>
               </div>
             </motion.form>
@@ -514,18 +565,27 @@ export default function RemindersPage() {
                       </div>
                     )}
 
-                    {/* Card Footer */}
+                    {/* Card Footer with Edit & Delete */}
                     <div className="flex justify-between items-center pt-1">
                       <span className="text-[10px] text-zinc-500">
                         {reminder.createdAt ? `Created: ${new Date(reminder.createdAt).toLocaleDateString('id-ID')}` : ''}
                       </span>
-                      <button
-                        onClick={() => deleteReminder(reminder.id)}
-                        className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
-                        title="Hapus"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleEdit(reminder)}
+                          className="p-1.5 text-zinc-400 hover:text-blue-400 hover:bg-blue-400/10 rounded-lg transition-colors"
+                          title="Edit Pengingat"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => deleteReminder(reminder.id)}
+                          className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-colors"
+                          title="Hapus"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
