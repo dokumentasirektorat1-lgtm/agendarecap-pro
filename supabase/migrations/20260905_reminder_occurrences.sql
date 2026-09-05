@@ -1,4 +1,4 @@
--- Database Schema Migration: Reminder Occurrences & Multi-Device Subscriptions
+-- Database Schema Migration: Reminder Occurrences & Multi-Device Subscriptions (No user_id dependency)
 -- File: supabase/migrations/20260905_reminder_occurrences.sql
 
 -- 1. Create Enums
@@ -14,12 +14,19 @@ EXCEPTION WHEN duplicate_object THEN null; END $$;
 CREATE TABLE IF NOT EXISTS reminders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     title TEXT NOT NULL,
+    body TEXT DEFAULT '',
+    time TEXT DEFAULT '08:00',
+    timezone TEXT DEFAULT 'Asia/Jakarta',
+    frequency TEXT DEFAULT 'once',
+    days_of_week INT[],
+    sound TEXT DEFAULT 'default',
+    is_active BOOLEAN DEFAULT true,
+    delivery_mode TEXT DEFAULT 'hybrid',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Ensure ALL columns exist on `reminders` table
-ALTER TABLE reminders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+-- Ensure base columns exist
 ALTER TABLE reminders ADD COLUMN IF NOT EXISTS body TEXT DEFAULT '';
 ALTER TABLE reminders ADD COLUMN IF NOT EXISTS time TEXT DEFAULT '08:00';
 ALTER TABLE reminders ADD COLUMN IF NOT EXISTS timezone TEXT DEFAULT 'Asia/Jakarta';
@@ -33,7 +40,6 @@ ALTER TABLE reminders ADD COLUMN IF NOT EXISTS delivery_mode TEXT DEFAULT 'hybri
 CREATE TABLE IF NOT EXISTS reminder_occurrences (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     reminder_id UUID REFERENCES reminders(id) ON DELETE CASCADE NOT NULL,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     scheduled_at TIMESTAMPTZ NOT NULL,
     status TEXT DEFAULT 'scheduled' NOT NULL,
     snoozed_until TIMESTAMPTZ,
@@ -48,7 +54,6 @@ CREATE TABLE IF NOT EXISTS reminder_occurrences (
 -- 4. Create `push_subscribers` table for Multi-Device Web Push
 CREATE TABLE IF NOT EXISTS push_subscribers (
     endpoint TEXT PRIMARY KEY,
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
     p256dh TEXT,
     auth TEXT,
     subscription JSONB NOT NULL,
@@ -57,34 +62,25 @@ CREATE TABLE IF NOT EXISTS push_subscribers (
     last_seen_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Indexes for new tables
+-- 5. Indexes
 CREATE INDEX IF NOT EXISTS idx_occurrences_cron ON reminder_occurrences (status, scheduled_at) WHERE status IN ('scheduled', 'snoozed');
 CREATE INDEX IF NOT EXISTS idx_occurrences_reminder ON reminder_occurrences (reminder_id);
-CREATE INDEX IF NOT EXISTS idx_occurrences_user ON reminder_occurrences (user_id);
-CREATE INDEX IF NOT EXISTS idx_push_subscribers_user ON push_subscribers (user_id);
 
--- 6. Enable Row Level Security (RLS)
+-- 6. Enable Row Level Security (RLS) with Universal Open Access (Zero column error)
 ALTER TABLE reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reminder_occurrences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_subscribers ENABLE ROW LEVEL SECURITY;
 
--- 7. RLS Policies
-DROP POLICY IF EXISTS "Users can manage their own reminders" ON reminders;
-CREATE POLICY "Users can manage their own reminders" ON reminders
-    FOR ALL USING (auth.uid() = user_id OR user_id IS NULL)
-    WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Universal access reminders" ON reminders;
+CREATE POLICY "Universal access reminders" ON reminders FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Users can manage their own occurrences" ON reminder_occurrences;
-CREATE POLICY "Users can manage their own occurrences" ON reminder_occurrences
-    FOR ALL USING (auth.uid() = user_id OR user_id IS NULL)
-    WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Universal access occurrences" ON reminder_occurrences;
+CREATE POLICY "Universal access occurrences" ON reminder_occurrences FOR ALL USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "Users can manage push subscriptions" ON push_subscribers;
-CREATE POLICY "Users can manage push subscriptions" ON push_subscribers
-    FOR ALL USING (auth.uid() = user_id OR user_id IS NULL)
-    WITH CHECK (auth.uid() = user_id OR user_id IS NULL);
+DROP POLICY IF EXISTS "Universal access subscribers" ON push_subscribers;
+CREATE POLICY "Universal access subscribers" ON push_subscribers FOR ALL USING (true) WITH CHECK (true);
 
--- 8. Atomic Claim Function for Vercel Cron
+-- 7. Atomic Claim Function for Vercel Cron
 CREATE OR REPLACE FUNCTION claim_due_occurrences(target_now TIMESTAMPTZ, fetch_limit INT DEFAULT 50)
 RETURNS SETOF reminder_occurrences
 LANGUAGE plpgsql
