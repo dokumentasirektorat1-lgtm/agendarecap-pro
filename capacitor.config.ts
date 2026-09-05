@@ -7,6 +7,8 @@ const config: CapacitorConfig = {
   server: {
     url: 'https://agendarecap.vercel.app',
     cleartext: true,
+    androidScheme: 'https',
+    hostname: 'agendarecap.vercel.app',
     allowNavigation: [
       'agendarecap.vercel.app',
       '*.vercel.app',
