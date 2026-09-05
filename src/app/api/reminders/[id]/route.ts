@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
+
+export const dynamic = 'force-static';
+export function generateStaticParams() { return []; }
 import { generateNextOccurrence } from '@/lib/reminder-service';
 
 function getAdminClient() {

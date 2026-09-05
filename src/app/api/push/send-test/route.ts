@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import webpush from 'web-push';
 
+export const dynamic = 'force-static';
+
 export async function POST(request: Request) {
   try {
     const { subscription, delayMs = 3000 } = await request.json();

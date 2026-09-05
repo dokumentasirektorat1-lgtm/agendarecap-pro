@@ -1,31 +1,50 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, ShieldAlert, CheckCircle2, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, Bell, Calendar, Clock, AlertCircle } from "lucide-react";
+import { ArrowLeft, ShieldAlert, CheckCircle2, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, Bell, Calendar, Clock, AlertCircle, Play, XCircle, Wrench } from "lucide-react";
 import Link from "next/link";
 import Swal from "sweetalert2";
 import { getRemindersFromIDB, getOccurrencesFromIDB, getOfflineQueue } from "@/lib/idb";
 import { runSyncEngine } from "@/lib/sync-engine";
-import { isNativePlatform, requestNativeAlarmPermissions, scheduleNativeLocalAlarm, cancelAllNativeLocalAlarms } from "@/lib/native-alarm";
+import {
+  isNativePlatform,
+  checkNativeAlarmPermissions,
+  requestExactAlarmPermission,
+  scheduleNativeLocalAlarm,
+  cancelNativeLocalAlarm,
+  cancelAllNativeLocalAlarms,
+  getScheduledNativeAlarms
+} from "@/lib/native-alarm";
 
 export default function NotificationSettingsPage() {
   const [platformInfo, setPlatformInfo] = useState<string>("");
-  const [permission, setPermission] = useState<NotificationPermission>("default");
+  const [androidVersion, setAndroidVersion] = useState<string>("Unknown");
+  const [capacitorVersion, setCapacitorVersion] = useState<string>("8.5.1");
+  const [appVersion, setAppVersion] = useState<string>("0.1.0");
+
+  const [notificationPermission, setNotificationPermission] = useState<string>("default");
+  const [exactAlarmPermission, setExactAlarmPermission] = useState<boolean>(true);
   const [nativeAlarmStatus, setNativeAlarmStatus] = useState<string>("INACTIVE");
+  const [webPushStatus, setWebPushStatus] = useState<string>("INACTIVE");
+
   const [swActive, setSwActive] = useState<boolean>(false);
   const [swScope, setSwScope] = useState<string>("");
   const [subscriptionActive, setSubscriptionActive] = useState<boolean>(false);
   const [endpointSnippet, setEndpointSnippet] = useState<string>("");
-  const [backendSynced, setBackendSynced] = useState<boolean>(false);
+
   const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [cacheVersion, setCacheVersion] = useState<string>("agendaku-pwa-v5");
+  const [indexedDbStatus, setIndexedDbStatus] = useState<string>("OK");
+  const [supabaseStatus, setSupabaseStatus] = useState<string>("CONNECTED");
   const [lastSyncTime, setLastSyncTime] = useState<string>("Belum ada");
 
-  // IDB Stats
+  // Local & Native Alarm Stats
   const [idbRemindersCount, setIdbRemindersCount] = useState<number>(0);
   const [idbOccurrencesCount, setIdbOccurrencesCount] = useState<number>(0);
   const [idbQueueCount, setIdbQueueCount] = useState<number>(0);
+  const [nativeAlarmCount, setNativeAlarmCount] = useState<number>(0);
+  const [nextAlarmTime, setNextAlarmTime] = useState<string>("Tidak ada");
 
+  const [testAlarmActive, setTestAlarmActive] = useState<boolean>(false);
   const [isTestingPush, setIsTestingPush] = useState<boolean>(false);
   const [isTestingLocal, setIsTestingLocal] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -34,23 +53,30 @@ export default function NotificationSettingsPage() {
     setIsRefreshing(true);
     if (typeof window === 'undefined') return;
 
-    setPlatformInfo(`${navigator.platform} - ${navigator.userAgent.substring(0, 50)}...`);
+    const ua = navigator.userAgent;
+    setPlatformInfo(`${navigator.platform} - ${ua.substring(0, 45)}...`);
     setIsOnline(navigator.onLine);
 
-    // 1. Notification Permission Check
-    if ('Notification' in window) {
-      setPermission(Notification.permission);
-    }
-
-    // 2. Native Alarm Check
-    if (isNativePlatform()) {
-      const nativePerm = await requestNativeAlarmPermissions();
-      setNativeAlarmStatus(nativePerm.notifications === 'granted' ? 'ACTIVE' : 'PERMISSION DENIED');
+    // Extract Android Version from UserAgent if on Android
+    const androidMatch = ua.match(/Android\s+([0-9\.]+)/i);
+    if (androidMatch && androidMatch[1]) {
+      setAndroidVersion(`Android ${androidMatch[1]}`);
     } else {
-      setNativeAlarmStatus('INACTIVE (Web Mode)');
+      setAndroidVersion("Non-Android OS");
     }
 
-    // 3. Service Worker & Push Check
+    // 1. Notification & Exact Alarm Permission Check
+    const permStatus = await checkNativeAlarmPermissions();
+    setNotificationPermission(permStatus.notifications);
+    setExactAlarmPermission(permStatus.exactAlarm);
+
+    if (isNativePlatform()) {
+      setNativeAlarmStatus(permStatus.exactAlarm && permStatus.notifications === 'granted' ? 'ACTIVE' : 'INACTIVE (Permission Required)');
+    } else {
+      setNativeAlarmStatus('INACTIVE (Web/PWA Mode)');
+    }
+
+    // 2. Service Worker & Push Check
     if ('serviceWorker' in navigator) {
       try {
         const reg = await navigator.serviceWorker.ready;
@@ -60,30 +86,21 @@ export default function NotificationSettingsPage() {
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
           setSubscriptionActive(true);
+          setWebPushStatus("ACTIVE");
           setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
-          setBackendSynced(true);
         } else {
           setSubscriptionActive(false);
+          setWebPushStatus("INACTIVE");
           setEndpointSnippet("");
-          setBackendSynced(false);
         }
       } catch (err) {
         setSwActive(false);
         setSubscriptionActive(false);
+        setWebPushStatus("INACTIVE");
       }
     }
 
-    // 4. Cache Check
-    if ('caches' in window) {
-      try {
-        const hasV5 = await caches.has('agendaku-pwa-v5');
-        if (hasV5) setCacheVersion('agendaku-pwa-v5 (ACTIVE)');
-      } catch (e) {
-        console.warn('Cache check notice:', e);
-      }
-    }
-
-    // 5. IndexedDB Stats
+    // 3. IndexedDB Stats & Supabase check
     try {
       const rems = await getRemindersFromIDB();
       const occs = await getOccurrencesFromIDB();
@@ -91,8 +108,41 @@ export default function NotificationSettingsPage() {
       setIdbRemindersCount(rems.length);
       setIdbOccurrencesCount(occs.length);
       setIdbQueueCount(queue.length);
+      setIndexedDbStatus("OK");
+
+      // Calculate Next Scheduled Alarm
+      const activeOccs = occs
+        .filter(o => o.status === 'scheduled' || o.status === 'snoozed')
+        .sort((a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime());
+
+      if (activeOccs.length > 0) {
+        const nextTarget = new Date(activeOccs[0].scheduledAt);
+        setNextAlarmTime(nextTarget.toLocaleString('id-ID'));
+      } else {
+        setNextAlarmTime("Tidak ada");
+      }
     } catch (e) {
-      console.warn('IDB diagnostic read notice:', e);
+      setIndexedDbStatus("ERROR");
+    }
+
+    // 4. Check Native Scheduled Alarms
+    if (isNativePlatform()) {
+      const scheduled = await getScheduledNativeAlarms();
+      setNativeAlarmCount(scheduled.length);
+    } else {
+      setNativeAlarmCount(0);
+    }
+
+    // 5. Supabase connection check
+    if (navigator.onLine) {
+      try {
+        const res = await fetch('/api/reminders', { method: 'HEAD' });
+        setSupabaseStatus(res.ok ? "CONNECTED" : "OFFLINE / SERVER ERROR");
+      } catch (e) {
+        setSupabaseStatus("OFFLINE");
+      }
+    } else {
+      setSupabaseStatus("OFFLINE");
     }
 
     const savedLastSync = localStorage.getItem('last_sync_timestamp');
@@ -118,141 +168,98 @@ export default function NotificationSettingsPage() {
     };
   }, []);
 
-  const requestNotificationPermission = async () => {
-    if (!('Notification' in window)) {
-      Swal.fire({ icon: 'error', title: 'Tidak Didukung', text: 'Browser tidak mendukung Notifikasi Desktop/PWA.' });
+  const handleOpenExactAlarmSettings = async () => {
+    const ok = await requestExactAlarmPermission();
+    if (!ok) {
+      Swal.fire({
+        icon: 'info',
+        title: 'Pengaturan Alarm Presisi',
+        text: 'Silakan izinkan "Alarms & Reminders" (Jadwalkan Alarm Presisi) pada pengaturan aplikasi Android.'
+      });
+    } else {
+      await runDiagnosticCheck();
+    }
+  };
+
+  const handleTest1MinAlarm = async () => {
+    if (!exactAlarmPermission && isNativePlatform()) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Permission Presisi Belum Diizinkan',
+        text: 'Alarm presisi belum diizinkan oleh sistem Android. Silakan klik "AKTIFKAN ALARM" terlebih dahulu.'
+      });
       return;
     }
 
-    const res = await Notification.requestPermission();
-    setPermission(res);
-
-    if (res === 'granted') {
-      await registerPushSubscription();
-    } else {
-      Swal.fire({
-        icon: 'warning',
-        title: 'Izin Notifikasi Ditolak',
-        text: 'Agendarecap membutuhkan izin notifikasi agar pengingat dan alarm dapat muncul tepat waktu.'
-      });
-    }
-  };
-
-  const registerPushSubscription = async () => {
-    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
-
-    try {
-      const reg = await navigator.serviceWorker.ready;
-      let sub = await reg.pushManager.getSubscription();
-
-      if (!sub) {
-        const VAPID_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-        if (!VAPID_KEY) {
-          Swal.fire({ icon: 'error', title: 'VAPID Key Missing', text: 'NEXT_PUBLIC_VAPID_PUBLIC_KEY tidak ditemukan.' });
-          return;
-        }
-
-        const urlBase64ToUint8Array = (base64String: string) => {
-          const padding = '='.repeat((4 - base64String.length % 4) % 4);
-          const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-          const rawData = window.atob(base64);
-          const outputArray = new Uint8Array(rawData.length);
-          for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
-          return outputArray;
-        };
-
-        sub = await reg.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(VAPID_KEY)
-        });
-      }
-
-      if (sub) {
-        setSubscriptionActive(true);
-        setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
-
-        const res = await fetch('/api/push/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subscription: sub,
-            deviceInfo: {
-              userAgent: navigator.userAgent,
-              platform: navigator.platform
-            }
-          })
-        });
-
-        if (res.ok) {
-          setBackendSynced(true);
-          Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Push Subscription Synced', showConfirmButton: false, timer: 2000 });
-        }
-      }
-    } catch (err: any) {
-      Swal.fire({ icon: 'error', title: 'Registration Push Gagal', text: err.message });
-    }
-  };
-
-  const handleTestLocalAlarm = async () => {
     setIsTestingLocal(true);
-    const targetTime = new Date(Date.now() + 5000).toISOString();
+    const targetDate = new Date(Date.now() + 60 * 1000);
+    const targetISO = targetDate.toISOString();
+    const testOccId = `test-1m-occ-${Date.now()}`;
+
+    let scheduledOk = false;
 
     if (isNativePlatform()) {
-      const ok = await scheduleNativeLocalAlarm({
-        reminderId: 'test-local-reminder',
-        occurrenceId: `test-occ-${Date.now()}`,
-        title: '⏰ TEST NATIVE ALARM LOKAL',
+      scheduledOk = await scheduleNativeLocalAlarm({
+        reminderId: 'test-1m-reminder',
+        occurrenceId: testOccId,
+        title: '⏰ TEST ALARM 1 MENIT (AgendaRecap)',
         body: 'Dokumen evaluasi dan laptop sudah disiapkan.',
-        scheduledAt: targetTime
+        scheduledAt: targetISO
       });
-
-      setIsTestingLocal(false);
-      if (ok) {
-        Swal.fire({
-          icon: 'success',
-          title: 'Native Alarm Dijadwalkan (+5 detik)',
-          text: 'Kunci atau matikan internet perangkat Anda. Alarm lokal native OS Android akan berbunyi dalam 5 detik.'
-        });
-      } else {
-        Swal.fire({ icon: 'error', title: 'Gagal Menjadwalkan Alarm Native' });
-      }
     } else {
-      // PWA Browser Fallback Test
+      // PWA Browser Fallback
       setTimeout(() => {
-        setIsTestingLocal(false);
         if ('Notification' in window && Notification.permission === 'granted') {
-          new Notification('⏰ TEST LOCAL ALARM (PWA Fallback)', {
-            body: 'Jangan lupa membawa dokumen evaluasi dan laptop.',
+          new Notification('⏰ TEST ALARM 1 MENIT (Browser Fallback)', {
+            body: 'Dokumen evaluasi dan laptop sudah disiapkan.',
             icon: '/icon.svg',
-            tag: `test-local-${Date.now()}`
+            tag: `test-1m-${Date.now()}`
           });
-        } else {
-          Swal.fire({ title: '⏰ TEST ALARM LOKAL', text: 'Jangan lupa membawa dokumen evaluasi dan laptop.', icon: 'info' });
         }
-      }, 3000);
-
-      Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Test alarm akan muncul dalam 3 detik', showConfirmButton: false, timer: 3000 });
+      }, 60000);
+      scheduledOk = true;
     }
+
+    setIsTestingLocal(false);
+
+    if (scheduledOk) {
+      setTestAlarmActive(true);
+      Swal.fire({
+        icon: 'success',
+        title: 'Alarm Berhasil Dijadwalkan (+1 Menit)',
+        text: 'Anda dapat menutup aplikasi atau mematikan internet. Alarm native akan tetap berbunyi tepat dalam 1 menit.'
+      });
+      await runDiagnosticCheck();
+    } else {
+      Swal.fire({
+        icon: 'error',
+        title: 'Gagal Menjadwalkan Test Alarm',
+        text: 'Pastikan permission notifikasi dan exact alarm sudah diberikan.'
+      });
+    }
+  };
+
+  const handleCancelTestAlarm = async () => {
+    if (isNativePlatform()) {
+      await cancelAllNativeLocalAlarms();
+    }
+    setTestAlarmActive(false);
+    Swal.fire({
+      icon: 'info',
+      title: 'Test Alarm Dibatalkan',
+      text: 'Semua test alarm aktif berhasil dibatalkan.'
+    });
+    await runDiagnosticCheck();
   };
 
   const handleTestPush = async () => {
-    if (permission !== 'granted') {
-      await requestNotificationPermission();
-      return;
-    }
-
     setIsTestingPush(true);
     try {
       const reg = await navigator.serviceWorker.ready;
       let subscription = await reg.pushManager.getSubscription();
 
       if (!subscription) {
-        await registerPushSubscription();
-        subscription = await reg.pushManager.getSubscription();
-      }
-
-      if (!subscription) {
-        Swal.fire({ icon: 'error', title: 'Push Subscription Kosong' });
+        Swal.fire({ icon: 'error', title: 'Push Subscription Kosong', text: 'Perangkat belum terdaftar untuk Web Push.' });
         setIsTestingPush(false);
         return;
       }
@@ -267,7 +274,7 @@ export default function NotificationSettingsPage() {
       setIsTestingPush(false);
 
       if (data.success) {
-        Swal.fire({ icon: 'success', title: 'Test Web Push Terkirim!', text: 'Notifikasi akan muncul dalam 2 detik.' });
+        Swal.fire({ icon: 'success', title: 'Test Web Push Terkirim!', text: 'Notifikasi push akan muncul dalam 2 detik.' });
       } else {
         Swal.fire({ icon: 'error', title: 'Server Push Gagal', text: data.error });
       }
@@ -285,50 +292,92 @@ export default function NotificationSettingsPage() {
     Swal.fire({
       icon: res.success ? 'success' : 'warning',
       title: 'Hasil Sync Engine',
-      text: `Status: ${res.success ? 'Berhasil' : 'Dengan Catatan'} | Total Item Tersinkron: ${res.syncedCount}`
+      text: `Status: ${res.success ? 'Berhasil' : 'Dengan Catatan'} | Item Tersinkron: ${res.syncedCount}`
     });
   };
 
-  const handleClearStaleCache = async () => {
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      let deleted = 0;
-      for (const k of keys) {
-        if (k !== 'agendaku-pwa-v5') {
-          await caches.delete(k);
-          deleted++;
+  const handleRebuildLocalAlarms = async () => {
+    const result = await Swal.fire({
+      title: 'Rebuild Local Alarms?',
+      text: 'Operasi ini akan menjadwalkan ulang seluruh alarm lokal dari data yang tersimpan di IndexedDB.',
+      icon: 'question',
+      showCancelButton: true,
+      confirmButtonText: 'Ya, Rebuild',
+      cancelButtonText: 'Batal'
+    });
+
+    if (!result.isConfirmed) return;
+
+    setIsRefreshing(true);
+    try {
+      const occs = await getOccurrencesFromIDB();
+      const rems = await getRemindersFromIDB();
+
+      const activeOccs = occs.filter(o => o.status === 'scheduled' || o.status === 'snoozed');
+
+      let reScheduledCount = 0;
+      for (const occ of activeOccs) {
+        const parent = rems.find(r => r.id === occ.reminderId);
+        const targetTime = occ.snoozedUntil || occ.scheduledAt;
+
+        if (new Date(targetTime).getTime() > Date.now()) {
+          await scheduleNativeLocalAlarm({
+            reminderId: occ.reminderId,
+            occurrenceId: occ.id,
+            title: parent?.title || 'Pengingat AgendaRecap',
+            body: parent?.body || '',
+            scheduledAt: targetTime
+          });
+          reScheduledCount++;
         }
       }
-      Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: `Dihapus ${deleted} cache usang`, showConfirmButton: false, timer: 1500 });
+
       await runDiagnosticCheck();
+      Swal.fire({
+        icon: 'success',
+        title: 'Rebuild Selesai',
+        text: `Berhasil menjadwalkan ulang ${reScheduledCount} alarm lokal native.`
+      });
+    } catch (e: any) {
+      Swal.fire({ icon: 'error', title: 'Rebuild Gagal', text: e.message });
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
   const handleCancelAllAlarms = async () => {
+    const result = await Swal.fire({
+      title: 'Batalkan Seluruh Alarm?',
+      text: 'Semua alarm lokal native yang sedang terjadwal akan dibatalkan.',
+      icon: 'warning',
+      showCancelButton: true,
+      confirmButtonColor: '#ef4444',
+      confirmButtonText: 'Ya, Batalkan Semua',
+      cancelButtonText: 'Batal'
+    });
+
+    if (!result.isConfirmed) return;
+
     if (isNativePlatform()) {
       await cancelAllNativeLocalAlarms();
-      Swal.fire({ icon: 'success', title: 'Seluruh Alarm Native Dibatalkan' });
-    } else {
-      if ('serviceWorker' in navigator) {
-        const reg = await navigator.serviceWorker.ready;
-        reg.active?.postMessage({ type: 'SW_CLEANUP_TEST_NOTIFICATIONS' });
-      }
-      Swal.fire({ icon: 'success', title: 'Seluruh Notifikasi Di-reset' });
     }
+    setTestAlarmActive(false);
+    await runDiagnosticCheck();
+    Swal.fire({ icon: 'success', title: 'Seluruh Alarm Lokal Dibatalkan' });
   };
 
   return (
-    <main className="min-h-screen relative bg-[#0A0A0B] text-zinc-100 p-4 sm:p-8 pb-20">
+    <main className="min-h-screen relative bg-[#0A0A0B] text-zinc-100 p-4 sm:p-8 pb-24">
       {/* Background Glow */}
       <div className="fixed top-[-10%] left-[-10%] w-[45%] h-[45%] bg-amber-600/10 rounded-full blur-[140px] pointer-events-none" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[45%] h-[45%] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none" />
 
       <div className="relative z-10 max-w-4xl mx-auto flex flex-col gap-6">
-        
+
         {/* Header */}
         <header className="flex items-center justify-between glass p-4 sm:p-6 rounded-[2rem] border border-amber-500/20 shadow-2xl">
           <div className="flex items-center gap-4">
-            <Link 
+            <Link
               href="/reminders"
               className="p-3 bg-white/5 hover:bg-white/10 rounded-xl transition-all text-zinc-400 hover:text-white border border-white/10"
             >
@@ -337,9 +386,9 @@ export default function NotificationSettingsPage() {
             <div>
               <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
                 <Bell className="w-6 h-6 text-amber-400" />
-                Notification & Alarm Status
+                Pengaturan Notifikasi & Alarm
               </h1>
-              <p className="text-xs sm:text-sm text-zinc-400 font-medium">Pengaturan & Panel Diagnostik Alarm AgendaRecap Pro</p>
+              <p className="text-xs sm:text-sm text-zinc-400 font-medium">Native Android Alarm Engine & Diagnostic Panel</p>
             </div>
           </div>
 
@@ -349,146 +398,234 @@ export default function NotificationSettingsPage() {
             className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
           >
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Refresh Status</span>
+            <span className="hidden sm:inline">REFRESH STATUS</span>
           </button>
         </header>
 
-        {/* Permission UX Banner */}
-        {permission !== 'granted' && (
-          <div className="glass p-5 rounded-[1.8rem] border border-amber-500/40 bg-amber-500/10 flex flex-col sm:flex-row items-center justify-between gap-4">
+        {/* Exact Alarm Permission Banner */}
+        {!exactAlarmPermission && isNativePlatform() && (
+          <div className="glass p-5 rounded-[1.8rem] border border-red-500/40 bg-red-500/10 flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-start gap-3">
-              <AlertCircle className="w-6 h-6 text-amber-400 shrink-0 mt-1" />
+              <AlertCircle className="w-6 h-6 text-red-400 shrink-0 mt-1" />
               <div>
-                <h3 className="font-bold text-amber-300 text-sm">Izin Notifikasi Diperlukan</h3>
+                <h3 className="font-bold text-red-300 text-sm">Alarm Presisi Belum Diizinkan</h3>
                 <p className="text-xs text-zinc-300">
-                  AgendaRecap membutuhkan izin notifikasi agar pengingat dan alarm dapat muncul tepat waktu.
+                  Android membutuhkan izin khusus "Jadwalkan Alarm Presisi" agar pengingat dapat berbunyi tepat waktu saat HP di-lock atau offline.
                 </p>
               </div>
             </div>
             <button
-              onClick={requestNotificationPermission}
-              className="w-full sm:w-auto px-5 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-black font-bold text-xs rounded-xl shadow-lg transition-all shrink-0"
+              onClick={handleOpenExactAlarmSettings}
+              className="w-full sm:w-auto px-5 py-2.5 bg-red-500 hover:bg-red-600 active:scale-95 text-white font-bold text-xs rounded-xl shadow-lg transition-all shrink-0 flex items-center justify-center gap-2"
             >
-              Minta Izin Notifikasi
+              <Smartphone className="w-4 h-4" /> AKTIFKAN ALARM
             </button>
           </div>
         )}
 
-        {/* Diagnostic Dashboard Grid */}
+        {/* Core Status Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          
+          {/* Notification Permission */}
+          <div className="glass p-4 rounded-[1.5rem] border border-white/10 flex flex-col justify-between gap-2">
+            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+              <ShieldAlert className="w-4 h-4 text-purple-400" /> Notification
+            </span>
+            <div className="flex items-center justify-between">
+              <span className={`text-sm font-black ${notificationPermission === 'granted' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {notificationPermission.toUpperCase()}
+              </span>
+              <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-zinc-400">OS Permission</span>
+            </div>
+          </div>
+
+          {/* Exact Alarm Permission */}
+          <div className="glass p-4 rounded-[1.5rem] border border-white/10 flex flex-col justify-between gap-2">
+            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-blue-400" /> Exact Alarm
+            </span>
+            <div className="flex items-center justify-between">
+              <span className={`text-sm font-black ${exactAlarmPermission ? 'text-emerald-400' : 'text-red-400'}`}>
+                {exactAlarmPermission ? 'GRANTED' : 'DENIED'}
+              </span>
+              {!exactAlarmPermission && isNativePlatform() && (
+                <button onClick={handleOpenExactAlarmSettings} className="text-[10px] text-amber-400 underline font-bold">
+                  IZINKAN
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Native Alarm */}
+          <div className="glass p-4 rounded-[1.5rem] border border-white/10 flex flex-col justify-between gap-2">
+            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Smartphone className="w-4 h-4 text-amber-400" /> Native Alarm
+            </span>
+            <span className={`text-sm font-black ${nativeAlarmStatus.startsWith('ACTIVE') ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {nativeAlarmStatus.startsWith('ACTIVE') ? 'ACTIVE' : 'INACTIVE'}
+            </span>
+          </div>
+
+          {/* Web Push */}
+          <div className="glass p-4 rounded-[1.5rem] border border-white/10 flex flex-col justify-between gap-2">
+            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Send className="w-4 h-4 text-emerald-400" /> Web Push
+            </span>
+            <span className={`text-sm font-black ${webPushStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-amber-400'}`}>
+              {webPushStatus}
+            </span>
+          </div>
+
+        </div>
+
+        {/* System & Connectivity Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           
-          {/* Item 1: Notification Permission */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <ShieldAlert className="w-4 h-4 text-purple-400" /> Notification Permission
-              </span>
-              <span className={`text-xs font-black ${permission === 'granted' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {permission.toUpperCase()}
-              </span>
-            </div>
-            <div className="text-xs text-zinc-300 flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
-              <span>Status Izin Web / OS:</span>
-              <span className="font-bold text-white">{permission}</span>
+          {/* Connection & Database Status */}
+          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
+            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2 border-b border-white/10 pb-2">
+              <Database className="w-4 h-4 text-emerald-400" /> Status Database & Koneksi
+            </h3>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Internet:</span>
+                <span className={`font-bold ${isOnline ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {isOnline ? 'ONLINE' : 'OFFLINE'}
+                </span>
+              </div>
+
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">IndexedDB:</span>
+                <span className={`font-bold ${indexedDbStatus === 'OK' ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {indexedDbStatus}
+                </span>
+              </div>
+
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Supabase Source:</span>
+                <span className={`font-bold ${supabaseStatus.startsWith('CONNECTED') ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {supabaseStatus}
+                </span>
+              </div>
+
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Last Sync:</span>
+                <span className="font-bold text-amber-300 truncate">{lastSyncTime}</span>
+              </div>
             </div>
           </div>
 
-          {/* Item 2: Native Alarm Status */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Smartphone className="w-4 h-4 text-blue-400" /> Android Local Alarm Engine
-              </span>
-              <span className={`text-xs font-black ${nativeAlarmStatus === 'ACTIVE' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {nativeAlarmStatus}
-              </span>
+          {/* Alarm Timers & Count */}
+          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
+            <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-2 border-b border-white/10 pb-2">
+              <Clock className="w-4 h-4 text-amber-400" /> Pengingat & Jadwal Terdekat
+            </h3>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Local Reminders:</span>
+                <span className="font-bold text-white">{idbRemindersCount} item</span>
+              </div>
+
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Local Occurrences:</span>
+                <span className="font-bold text-white">{idbOccurrencesCount} item</span>
+              </div>
+
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Native OS Alarms:</span>
+                <span className="font-bold text-amber-300">{nativeAlarmCount} alarm</span>
+              </div>
+
+              <div className="bg-black/40 p-3 rounded-xl border border-white/5 flex flex-col gap-1">
+                <span className="text-zinc-400">Pending Sync Queue:</span>
+                <span className="font-bold text-purple-300">{idbQueueCount} mutasi</span>
+              </div>
             </div>
-            <div className="text-xs text-zinc-300 flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
-              <span>Platform Mode:</span>
-              <span className="font-bold text-white">{isNativePlatform() ? 'Capacitor Native Android' : 'Web / PWA Fallback'}</span>
+
+            <div className="bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 text-xs flex justify-between items-center">
+              <span className="text-amber-300 font-bold">Alarm Terdekat Berikutnya:</span>
+              <span className="font-black text-white">{nextAlarmTime}</span>
             </div>
           </div>
 
-          {/* Item 3: Push Subscription */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Send className="w-4 h-4 text-emerald-400" /> Push Subscription State
-              </span>
-              <span className={`text-xs font-black ${subscriptionActive ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {subscriptionActive ? 'ACTIVE' : 'INACTIVE'}
-              </span>
-            </div>
-            <div className="text-[11px] font-mono text-zinc-400 bg-black/40 p-3 rounded-xl border border-white/5 truncate">
-              {endpointSnippet || 'Belum ada push token'}
-            </div>
-          </div>
+        </div>
 
-          {/* Item 4: Sync & Network */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col justify-between gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Wifi className="w-4 h-4 text-amber-400" /> Synchronization State
-              </span>
-              <span className={`text-xs font-black ${isOnline ? 'text-emerald-400' : 'text-red-400'}`}>
-                {isOnline ? 'ONLINE' : 'OFFLINE'}
-              </span>
-            </div>
-            <div className="text-xs text-zinc-300 flex justify-between items-center bg-black/40 p-3 rounded-xl border border-white/5">
-              <span>Terakhir Sinkronisasi:</span>
-              <span className="font-bold text-emerald-400">{lastSyncTime}</span>
+        {/* Test Alarm Controls (Requirement 25) */}
+        <div className="glass p-6 rounded-[2rem] border border-amber-500/30 bg-amber-500/5 flex flex-col gap-4">
+          <h2 className="text-sm font-bold text-amber-300 uppercase tracking-wider flex items-center gap-2">
+            <Play className="w-4 h-4 text-amber-400" /> Pengujian Alarm & Local Notification
+          </h2>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p className="text-xs text-zinc-300">
+              Tekan <strong className="text-white">TEST ALARM 1 MENIT</strong> untuk menjadwalkan alarm native OS +1 menit.
+              Anda dapat mengunci HP atau mematikan internet untuk menguji alarm offline.
+            </p>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <button
+                onClick={handleTest1MinAlarm}
+                disabled={isTestingLocal}
+                className="w-full sm:w-auto px-5 py-3 bg-amber-500 hover:bg-amber-600 active:scale-95 text-black font-extrabold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 shrink-0"
+              >
+                <Clock className="w-4 h-4" /> TEST ALARM 1 MENIT
+              </button>
+
+              <button
+                onClick={handleCancelTestAlarm}
+                className="w-full sm:w-auto px-4 py-3 bg-white/10 hover:bg-white/20 text-zinc-300 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2 shrink-0"
+              >
+                <XCircle className="w-4 h-4 text-red-400" /> CANCEL TEST ALARM
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Diagnostic Actions Panel */}
+        {/* Developer Diagnostics Panel (Requirement 26) */}
         <div className="glass p-6 rounded-[2rem] border border-white/10 flex flex-col gap-4">
           <h2 className="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-amber-400" /> Panel Pengujian & Utilitas Alarm
+            <Terminal className="w-4 h-4 text-blue-400" /> Panel Diagnostik Developer
           </h2>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <button
-              onClick={handleTestLocalAlarm}
-              disabled={isTestingLocal}
-              className="p-3.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-300 rounded-xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5"
-            >
-              <Clock className="w-5 h-5 text-blue-400" />
-              <span>TEST LOCAL ALARM</span>
-            </button>
+          {/* System Info Table */}
+          <div className="bg-black/50 p-4 rounded-xl border border-white/5 space-y-2 text-xs font-mono text-zinc-400">
+            <div className="flex justify-between"><span>Platform OS:</span><span className="text-white truncate">{platformInfo}</span></div>
+            <div className="flex justify-between"><span>Android Version:</span><span className="text-white">{androidVersion}</span></div>
+            <div className="flex justify-between"><span>App Version:</span><span className="text-white">{appVersion}</span></div>
+            <div className="flex justify-between"><span>Capacitor SDK:</span><span className="text-white">{capacitorVersion}</span></div>
+            <div className="flex justify-between"><span>Service Worker Scope:</span><span className="text-emerald-400 truncate">{swScope || 'None'}</span></div>
+          </div>
 
+          {/* Diagnostic Action Buttons */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
             <button
-              onClick={handleTestPush}
-              disabled={isTestingPush}
-              className="p-3.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 rounded-xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5"
+              onClick={runDiagnosticCheck}
+              className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
             >
-              <Send className="w-5 h-5 text-emerald-400" />
-              <span>TEST PUSH</span>
+              <RefreshCw className="w-4 h-4 text-blue-400" /> REFRESH STATUS
             </button>
 
             <button
               onClick={handleTestSync}
-              className="p-3.5 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5"
+              className="p-3 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
             >
-              <RefreshCw className="w-5 h-5 text-purple-400" />
-              <span>TEST SYNC</span>
+              <RefreshCw className="w-4 h-4 text-purple-400" /> RESYNC
             </button>
 
             <button
-              onClick={handleClearStaleCache}
-              className="p-3.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl font-bold text-xs transition-all flex flex-col items-center justify-center gap-1.5"
+              onClick={handleRebuildLocalAlarms}
+              className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
             >
-              <Layers className="w-5 h-5 text-amber-400" />
-              <span>CLEAR CACHE</span>
+              <Wrench className="w-4 h-4 text-amber-400" /> REBUILD ALARMS
             </button>
-          </div>
 
-          <div className="flex justify-end pt-2">
             <button
               onClick={handleCancelAllAlarms}
-              className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-xl text-xs font-bold transition-all flex items-center gap-2"
+              className="p-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-400 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
             >
-              <Trash2 className="w-4 h-4" /> CANCEL ALL LOCAL ALARMS
+              <Trash2 className="w-4 h-4 text-red-400" /> CANCEL ALL ALARMS
             </button>
           </div>
         </div>

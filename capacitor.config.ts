@@ -4,6 +4,10 @@ const config: CapacitorConfig = {
   appId: 'com.agendarecap.app',
   appName: 'AgendaRecap Pro',
   webDir: 'public',
+  server: {
+    url: 'https://agendarecap.vercel.app',
+    cleartext: true,
+  },
   plugins: {
     LocalNotifications: {
       smallIcon: 'ic_stat_icon',

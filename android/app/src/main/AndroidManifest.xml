@@ -33,6 +33,34 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Native Alarm Receivers -->
+        <receiver
+            android:name=".AlarmReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".NotificationActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.agendarecap.app.ACTION_CLOSE" />
+                <action android:name="com.agendarecap.app.ACTION_SNOOZE_5" />
+                <action android:name="com.agendarecap.app.ACTION_SNOOZE_15" />
+                <action android:name="com.agendarecap.app.ACTION_SNOOZE_60" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions for Exact OS Alarm & Notifications -->
