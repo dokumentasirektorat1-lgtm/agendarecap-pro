@@ -4,15 +4,11 @@
 -- 1. Create Enums
 DO $$ BEGIN
     CREATE TYPE reminder_status AS ENUM ('scheduled', 'processing', 'sent', 'snoozed', 'completed', 'dismissed', 'cancelled', 'failed');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 DO $$ BEGIN
     CREATE TYPE delivery_mode AS ENUM ('hybrid', 'server', 'local');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+EXCEPTION WHEN duplicate_object THEN null; END $$;
 
 -- 2. Base Reminders Table (Definitions)
 CREATE TABLE IF NOT EXISTS reminders (
@@ -22,7 +18,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Guarantee ALL columns exist on `reminders` table BEFORE creating any indexes or policies
+-- Ensure ALL columns exist on `reminders` table
 ALTER TABLE reminders ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
 ALTER TABLE reminders ADD COLUMN IF NOT EXISTS body TEXT DEFAULT '';
 ALTER TABLE reminders ADD COLUMN IF NOT EXISTS time TEXT DEFAULT '08:00';
@@ -61,8 +57,7 @@ CREATE TABLE IF NOT EXISTS push_subscribers (
     last_seen_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Indexes (Safely created ONLY AFTER columns are guaranteed to exist)
-CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders (user_id);
+-- 5. Indexes for new tables
 CREATE INDEX IF NOT EXISTS idx_occurrences_cron ON reminder_occurrences (status, scheduled_at) WHERE status IN ('scheduled', 'snoozed');
 CREATE INDEX IF NOT EXISTS idx_occurrences_reminder ON reminder_occurrences (reminder_id);
 CREATE INDEX IF NOT EXISTS idx_occurrences_user ON reminder_occurrences (user_id);
