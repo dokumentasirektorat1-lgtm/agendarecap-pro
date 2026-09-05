@@ -51,11 +51,33 @@ function playSound(type: string) {
 }
 
 export default function ReminderNotifier() {
-  const { reminders, fetchReminders } = useReminderStore();
+  const { reminders, fetchReminders, snoozeReminder, updateReminderStatus } = useReminderStore();
 
   useEffect(() => {
     fetchReminders();
   }, [fetchReminders]);
+
+  // Listen to messages from Service Worker (e.g. Snooze / Dismiss actions from Notification UI)
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const handleSWMessage = (event: MessageEvent) => {
+      if (!event.data) return;
+      const { type, reminderId, minutes, status } = event.data;
+
+      if (type === 'REMINDER_SNOOZED' && reminderId) {
+        snoozeReminder(reminderId, minutes || 5);
+      }
+      if (type === 'REMINDER_STATUS_CHANGED' && reminderId && status) {
+        updateReminderStatus(reminderId, status);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleSWMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+    };
+  }, [snoozeReminder, updateReminderStatus]);
 
   // Sync active reminders to Service Worker for OFFLINE & Closed-App background delivery
   useEffect(() => {
@@ -77,7 +99,7 @@ export default function ReminderNotifier() {
     }
   }, [reminders]);
 
-  // Foreground tab timer check
+  // Foreground tab timer check (Runs every 30 seconds only when tab is active)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -85,7 +107,7 @@ export default function ReminderNotifier() {
       const dayOfWeek = now.getDay();
 
       reminders.forEach(r => {
-        if (!r.isActive) return;
+        if (!r.isActive || r.status === 'completed' || r.status === 'dismissed' || r.status === 'cancelled') return;
         if (r.time !== currentHHmm) return;
 
         let shouldNotify = false;
@@ -108,41 +130,39 @@ export default function ReminderNotifier() {
 
           localStorage.setItem(`reminder_fired_${r.id}`, now.getTime().toString());
 
-          const notificationOptions: any = {
-            body: "Pengingat Personal AgendaRecap",
-            icon: "/icon-192x192.png",
-            tag: `reminder-${r.id}`,
-            requireInteraction: true,
-            vibrate: [200, 100, 200, 100, 200],
-          };
+          playSound(r.sound || 'default');
 
-          if ('Notification' in window && Notification.permission === 'granted') {
-            navigator.serviceWorker.ready.then(reg => {
-              reg.showNotification(r.title, notificationOptions);
-            }).catch(() => {
-              new Notification(r.title, notificationOptions);
-            });
-            
-            playSound(r.sound || 'default');
-          }
-
-          // Sticky in-app modal when foreground
+          // Sticky in-app modal when user is currently viewing the foreground tab
           Swal.fire({
             title: r.title,
-            text: `Waktu pengingat Anda (${r.time}) telah tiba!`,
+            text: r.body || `Waktu pengingat Anda (${r.time}) telah tiba!`,
             icon: 'info',
-            showConfirmButton: true,
-            confirmButtonText: 'Oke, Mengerti',
+            showCancelButton: true,
+            showDenyButton: true,
+            confirmButtonText: '⏱ Snooze 5 Min',
+            denyButtonText: '⏱ Snooze 15 Min',
+            cancelButtonText: '❌ Close / Dismiss',
+            confirmButtonColor: '#3b82f6',
+            denyButtonColor: '#8b5cf6',
+            cancelButtonColor: '#6b7280',
             allowOutsideClick: false,
             allowEscapeKey: false,
             backdrop: `rgba(0,0,0,0.8)`
+          }).then((result) => {
+            if (result.isConfirmed) {
+              snoozeReminder(r.id, 5);
+            } else if (result.isDenied) {
+              snoozeReminder(r.id, 15);
+            } else {
+              updateReminderStatus(r.id, 'dismissed');
+            }
           });
         }
       });
-    }, 30000); // check every 30s
+    }, 30000);
 
     return () => clearInterval(interval);
-  }, [reminders]);
+  }, [reminders, snoozeReminder, updateReminderStatus]);
 
   return null; 
 }
