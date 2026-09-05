@@ -67,41 +67,42 @@ export default function NotificationSettingsPage() {
 
     // 1. Notification & Exact Alarm Permission Check
     const permStatus = await checkNativeAlarmPermissions();
+    setNotificationPermission(permStatus.notifications || 'granted');
+    setExactAlarmPermission(permStatus.exactAlarm);
+
     if (isNativePlatform()) {
-      setNotificationPermission(permStatus.notifications || 'granted');
-      setExactAlarmPermission(permStatus.exactAlarm);
-      setNativeAlarmStatus(permStatus.exactAlarm ? 'ACTIVE (Native Android)' : 'INACTIVE (Permission Required)');
+      setNativeAlarmStatus(permStatus.exactAlarm ? 'ACTIVE (Native Android OS)' : 'INACTIVE (Permission Required)');
+    } else {
+      setNativeAlarmStatus('INACTIVE (Web/PWA Mode)');
+    }
+
+    // 2. Service Worker & Push Check (All platforms)
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        setSwActive(true);
+        setSwScope(reg.scope);
+
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+          setSubscriptionActive(true);
+          setWebPushStatus("ACTIVE");
+          setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
+        } else {
+          setSubscriptionActive(false);
+          setWebPushStatus(isNativePlatform() ? "NATIVE ALARM ENGINE" : "INACTIVE");
+          setEndpointSnippet("");
+        }
+      } catch (err) {
+        setSwActive(isNativePlatform());
+        setSwScope(isNativePlatform() ? 'Native OS Android Bridge' : '');
+        setSubscriptionActive(false);
+        setWebPushStatus(isNativePlatform() ? "NATIVE ALARM ENGINE" : "INACTIVE");
+      }
+    } else if (isNativePlatform()) {
       setSwActive(true);
       setSwScope('Native OS Android Bridge');
       setWebPushStatus('NATIVE ALARM ENGINE');
-    } else {
-      setNotificationPermission(permStatus.notifications);
-      setExactAlarmPermission(true);
-      setNativeAlarmStatus('INACTIVE (Web/PWA Mode)');
-
-      // 2. Service Worker & Push Check
-      if ('serviceWorker' in navigator) {
-        try {
-          const reg = await navigator.serviceWorker.ready;
-          setSwActive(true);
-          setSwScope(reg.scope);
-
-          const sub = await reg.pushManager.getSubscription();
-          if (sub) {
-            setSubscriptionActive(true);
-            setWebPushStatus("ACTIVE");
-            setEndpointSnippet(sub.endpoint.substring(0, 40) + '...');
-          } else {
-            setSubscriptionActive(false);
-            setWebPushStatus("INACTIVE");
-            setEndpointSnippet("");
-          }
-        } catch (err) {
-          setSwActive(false);
-          setSubscriptionActive(false);
-          setWebPushStatus("INACTIVE");
-        }
-      }
     }
 
     // 3. IndexedDB Stats & Supabase check

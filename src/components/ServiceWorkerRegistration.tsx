@@ -3,23 +3,40 @@
 import { useEffect } from "react";
 import { initSyncEngineListeners } from "@/lib/sync-engine";
 import { initNativeAlarmListeners } from "@/lib/native-alarm";
+import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 
 export default function ServiceWorkerRegistration() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    // Initialize Native Alarm Listeners (Android Capacitor OS Action Buttons)
+    // 1. Initialize Native Alarm Listeners (Android OS Action Buttons)
     initNativeAlarmListeners();
 
-    if (!('serviceWorker' in navigator)) return;
+    // 2. Hardware Back Button handler for Android Native App
+    if (Capacitor.isNativePlatform()) {
+      App.addListener('backButton', ({ canGoBack }) => {
+        if (canGoBack && window.location.pathname !== '/') {
+          window.history.back();
+        } else {
+          App.exitApp();
+        }
+      }).catch((err) => {
+        console.warn('[CAPACITOR BACK BUTTON] Error registering back button listener:', err);
+      });
+    }
 
-    // Initialize Global Sync Engine Listeners (online event, visibility change)
+    // 3. Initialize Global Sync Engine Listeners (online event, visibility change)
     initSyncEngineListeners();
+
+    // 4. Service Worker Registration (Web Push & Offline Fallback)
+    if (!('serviceWorker' in navigator)) return;
 
     const registerSW = async () => {
       try {
-        const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        console.log('[ServiceWorker v4] Registered with scope:', registration.scope);
+        const swUrl = new URL('/sw.js', window.location.origin).href;
+        const registration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
+        console.log('[ServiceWorker v5] Registered with scope:', registration.scope);
 
         // Check for updates on every page load
         registration.update().catch(() => {});
@@ -29,13 +46,13 @@ export default function ServiceWorkerRegistration() {
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[ServiceWorker v4] New Service Worker version installed and ready.');
+                console.log('[ServiceWorker v5] New Service Worker version installed and ready.');
               }
             };
           }
         });
       } catch (err) {
-        console.error('[ServiceWorker v4] Registration failed:', err);
+        console.error('[ServiceWorker v5] Registration failed:', err);
       }
     };
 
