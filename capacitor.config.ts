@@ -7,6 +7,7 @@ const config: CapacitorConfig = {
   server: {
     url: 'https://agendarecap.vercel.app',
     cleartext: true,
+    errorPath: 'index.html',
   },
   plugins: {
     LocalNotifications: {
