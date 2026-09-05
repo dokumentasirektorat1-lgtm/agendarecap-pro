@@ -121,15 +121,32 @@ export default function RemindersPage() {
   const handleTriggerCronServer = async () => {
     setIsTestingCron(true);
     try {
-      const res = await fetch('/api/cron/reminders');
+      const res = await fetch('/api/cron/reminders?manual=true');
       const data = await res.json();
       await fetchReminders();
-      Swal.fire({
-        icon: res.ok ? 'success' : 'info',
-        title: 'Eksekusi Scheduler Server',
-        text: `Status: ${data.message || JSON.stringify(data)}`,
-        timer: 3000
-      });
+
+      if (data.success) {
+        Swal.fire({
+          title: '⚙️ SCHEDULER SERVER EXECUTED',
+          html: `
+            <div class="text-left text-xs space-y-2 font-mono bg-black/50 p-3 rounded-xl border border-white/10">
+              <p class="text-emerald-400 font-bold">✓ Status: Server Cron Execution Success</p>
+              <p class="text-zinc-300"><b>Pengingat Jatuh Tempo Ditemukan:</b> ${data.foundCount || 0}</p>
+              <p class="text-zinc-300"><b>Notifikasi Push Berhasil Dikirim:</b> ${data.successPushCount || 0}</p>
+              <p class="text-amber-300"><b>Target Push Gagal / Expired:</b> ${data.failedPushCount || 0}</p>
+              ${data.foundCount === 0 ? '<p class="text-zinc-400 italic mt-2">Catatan: Belum ada pengingat yang telah melewati jam jatuh tempo saat ini.</p>' : ''}
+            </div>
+          `,
+          icon: 'success',
+          confirmButtonText: 'Tutup'
+        });
+      } else {
+        Swal.fire({
+          icon: 'error',
+          title: 'Eksekusi Cron Server Gagal',
+          text: data.error || 'Terjadi kesalahan saat memproses cron server.'
+        });
+      }
     } catch (err: any) {
       Swal.fire({ icon: 'error', title: 'Gagal Trigger Cron', text: err.message });
     } finally {
