@@ -1,6 +1,6 @@
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 import webpush from 'web-push';
-import { formatLocalFromUTC, getUTCISOFromLocal } from '@/lib/timezone';
+import { formatLocalFromUTC } from '@/lib/timezone';
 
 export interface ProcessRemindersResult {
   success: boolean;
@@ -12,9 +12,6 @@ export interface ProcessRemindersResult {
   logs: string[];
   error?: string;
 }
-
-// In-memory tracker for fallback push deduplication to avoid firing twice within 60 seconds
-const firedFallbackMap: Record<string, number> = {};
 
 export async function processDueReminders(): Promise<ProcessRemindersResult> {
   const logs: string[] = [];
@@ -65,28 +62,7 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
   let totalProcessed = 0;
   let foundCount = 0;
 
-  // =========================================================================
-  // STRATEGY 1: Primary `reminders` table query
-  // =========================================================================
-  let dueRemindersFromTable: any[] | null = null;
-  try {
-    const { data, error: reminderErr } = await supabase
-      .from('reminders')
-      .select('*')
-      .in('status', ['scheduled', 'snoozed'])
-      .lte('scheduled_at', nowISO)
-      .eq('is_active', true);
-
-    if (reminderErr) {
-      addLog(`Notice: 'reminders' table query notice: ${reminderErr.message} (Will fallback to push_subscribers schema if needed)`);
-    } else {
-      dueRemindersFromTable = data;
-    }
-  } catch (e: any) {
-    addLog(`Notice: 'reminders' table exception: ${e.message}`);
-  }
-
-  // Fetch Push Subscribers from database
+  // 1. Fetch Push Subscribers from database
   const { data: subscribers, error: subErr } = await supabase
     .from('push_subscribers')
     .select('*');
@@ -107,11 +83,30 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
 
   addLog(`Active Push Subscribers in DB: ${subscribers.length}`);
 
+  // =========================================================================
+  // STRATEGY 1: Primary `reminders` table query
+  // =========================================================================
+  let dueRemindersFromTable: any[] | null = null;
+  try {
+    const { data, error: reminderErr } = await supabase
+      .from('reminders')
+      .select('*')
+      .in('status', ['scheduled', 'snoozed'])
+      .lte('scheduled_at', nowISO)
+      .eq('is_active', true);
+
+    if (!reminderErr && data && data.length > 0) {
+      dueRemindersFromTable = data;
+    }
+  } catch (e: any) {
+    addLog(`Notice: 'reminders' table query notice: ${e.message}`);
+  }
+
   if (dueRemindersFromTable && dueRemindersFromTable.length > 0) {
     foundCount += dueRemindersFromTable.length;
     addLog(`Primary Table Strategy: Found ${dueRemindersFromTable.length} due reminders in 'reminders' table`);
 
-    // Acquire atomic processing lock
+    // Claim occurrence: Atomic state lock (scheduled/snoozed -> processing)
     const dueIds = dueRemindersFromTable.map(r => r.id);
     await supabase
       .from('reminders')
@@ -120,27 +115,29 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
 
     for (const r of dueRemindersFromTable) {
       totalProcessed++;
+      const occurrenceId = crypto.randomUUID();
       const scheduledLocalWIB = formatLocalFromUTC(r.scheduled_at, r.timezone || 'Asia/Jakarta');
-      addLog(`Processing table reminder id=${r.id} title="${r.title}" scheduledAt=${r.scheduled_at} (${scheduledLocalWIB})`);
+      addLog(`Processing table reminder id=${r.id} occurrenceId=${occurrenceId} title="${r.title}" scheduledAt=${r.scheduled_at} (${scheduledLocalWIB})`);
 
       const targetSubs = subscribers.filter(s => !r.user_id || s.user_id === r.user_id || subscribers.length === 1);
       const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
 
+      // NO OPEN ACTION! ONLY CLOSE & SNOOZE
       const payload = JSON.stringify({
         type: 'reminder',
-        id: r.id,
         reminderId: r.id,
+        occurrenceId,
+        notificationTag: `reminder-${r.id}-${occurrenceId}`,
         title: r.title,
         body: r.body || `Waktu pengingat Anda (${r.time || 'sekarang'}) telah tiba!`,
         scheduledAt: r.scheduled_at,
-        notificationTag: r.notification_tag || `reminder-${r.id}`,
-        url: '/reminders',
+        isRecurring: r.frequency && r.frequency !== 'once',
+        source: r.title?.includes('Uji') ? 'scheduled-test' : 'scheduled',
         actions: [
-          { action: 'open', title: '📂 OPEN' },
+          { action: 'close', title: '❌ CLOSE' },
           { action: 'snooze_5', title: '⏱ 5 MIN' },
           { action: 'snooze_15', title: '⏱ 15 MIN' },
-          { action: 'snooze_60', title: '⏱ 1 HOUR' },
-          { action: 'close', title: '❌ CLOSE' }
+          { action: 'snooze_60', title: '⏱ 1 HOUR' }
         ]
       });
 
@@ -161,6 +158,7 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
         }
       }
 
+      // Mark status as 'sent' so it will NEVER be picked up again
       const finalStatus = pushSuccess ? 'sent' : 'failed';
       await supabase
         .from('reminders')
@@ -172,72 +170,64 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
   // =========================================================================
   // STRATEGY 2: Fallback `push_subscribers.reminders` JSONB array scan
   // =========================================================================
-  const gmt7Time = new Date(now.getTime() + (7 * 60 * 60 * 1000));
-  const currentHHmm = `${gmt7Time.getUTCHours().toString().padStart(2, '0')}:${gmt7Time.getUTCMinutes().toString().padStart(2, '0')}`;
-  const dayOfWeek = gmt7Time.getUTCDay();
-  const todayStr = gmt7Time.toISOString().split('T')[0];
-
   for (const sub of subscribers) {
-    if (!sub.reminders || !Array.isArray(sub.reminders)) continue;
+    if (!sub.reminders || !Array.isArray(sub.reminders) || sub.reminders.length === 0) continue;
 
-    for (const r of sub.reminders) {
-      if (r.isActive === false) continue;
+    let subscriberJsonModified = false;
+    const updatedSubReminders = [...sub.reminders];
+
+    for (let i = 0; i < updatedSubReminders.length; i++) {
+      const r = updatedSubReminders[i];
+
+      // ONLY process if status is 'scheduled' or 'snoozed' AND isActive is true
+      const rStatus = r.status || 'scheduled';
+      const rActive = r.isActive !== false;
+
+      if (!rActive || (rStatus !== 'scheduled' && rStatus !== 'snoozed')) {
+        continue;
+      }
 
       let isDue = false;
 
-      // 1. Check explicit scheduledAt ISO timestamp
       if (r.scheduledAt) {
         const scheduledTime = new Date(r.scheduledAt).getTime();
         if (scheduledTime <= now.getTime()) {
           isDue = true;
         }
       }
-      
-      // 2. Fallback check HH:mm time match
-      if (!isDue && r.time === currentHHmm) {
-        if (r.frequency === 'once' || !r.frequency) {
-          const createdDate = r.createdAt ? new Date(r.createdAt).toDateString() : now.toDateString();
-          if (createdDate === now.toDateString() || new Date(r.createdAt || 0).getTime() <= now.getTime()) {
-            isDue = true;
-          }
-        } else if (r.frequency === 'daily') {
-          isDue = true;
-        } else if (r.frequency === 'weekdays' && dayOfWeek !== 0 && dayOfWeek !== 6) {
-          isDue = true;
-        } else if (r.frequency === 'weekly' && r.daysOfWeek?.includes(dayOfWeek)) {
-          isDue = true;
-        }
-      }
 
       if (isDue) {
-        const dedupeKey = `${r.id}_${todayStr}_${r.time || currentHHmm}`;
-        const lastFired = firedFallbackMap[dedupeKey];
-        if (lastFired && (now.getTime() - lastFired) < 60000) {
-          // Already fired within last 60s
-          continue;
-        }
-
         foundCount++;
         totalProcessed++;
-        firedFallbackMap[dedupeKey] = now.getTime();
+        const occurrenceId = crypto.randomUUID();
 
-        addLog(`Fallback Strategy: Due reminder found in push_subscribers JSON: id=${r.id} title="${r.title}" time=${r.time}`);
+        addLog(`Fallback Strategy: Due reminder found in push_subscribers JSON: id=${r.id} title="${r.title}"`);
 
+        // Claim in JSON array immediately so it won't loop
+        updatedSubReminders[i] = {
+          ...r,
+          status: 'sent',
+          isActive: false, // Mark inactive for one-time fallback to PREVENT LOOPING
+          updatedAt: nowISO
+        };
+        subscriberJsonModified = true;
+
+        // NO OPEN ACTION! ONLY CLOSE & SNOOZE
         const payload = JSON.stringify({
           type: 'reminder',
-          id: r.id,
           reminderId: r.id,
+          occurrenceId,
+          notificationTag: `reminder-${r.id}-${occurrenceId}`,
           title: r.title,
-          body: r.body || `Waktu pengingat Anda (${r.time || currentHHmm}) telah tiba!`,
+          body: r.body || `Waktu pengingat Anda (${r.time || 'sekarang'}) telah tiba!`,
           scheduledAt: r.scheduledAt || nowISO,
-          notificationTag: `reminder-${r.id}`,
-          url: '/reminders',
+          isRecurring: r.frequency && r.frequency !== 'once',
+          source: r.title?.includes('Uji') ? 'scheduled-test' : 'scheduled',
           actions: [
-            { action: 'open', title: '📂 OPEN' },
+            { action: 'close', title: '❌ CLOSE' },
             { action: 'snooze_5', title: '⏱ 5 MIN' },
             { action: 'snooze_15', title: '⏱ 15 MIN' },
-            { action: 'snooze_60', title: '⏱ 1 HOUR' },
-            { action: 'close', title: '❌ CLOSE' }
+            { action: 'snooze_60', title: '⏱ 1 HOUR' }
           ]
         });
 
@@ -253,6 +243,14 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
           }
         }
       }
+    }
+
+    // Persist updated JSON array to Supabase DB to permanently lock state
+    if (subscriberJsonModified) {
+      await supabase
+        .from('push_subscribers')
+        .update({ reminders: updatedSubReminders })
+        .eq('endpoint', sub.endpoint);
     }
   }
 

@@ -11,15 +11,15 @@ export default function ServiceWorkerRegistration() {
         const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
         console.log('[ServiceWorker] Registered with scope:', registration.scope);
 
-        // Check for updates on load
+        // Force check update to replace any stale service worker with v3
+        registration.update().catch(() => {});
+
         registration.addEventListener('updatefound', () => {
           const installingWorker = registration.installing;
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[ServiceWorker] New version available, updating cache...');
-                // Optionally postMessage skipWaiting if needed
-                installingWorker.postMessage({ type: 'SKIP_WAITING' });
+                console.log('[ServiceWorker] New v3 version installed and ready.');
               }
             };
           }

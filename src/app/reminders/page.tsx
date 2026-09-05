@@ -264,11 +264,10 @@ export default function RemindersPage() {
         requireInteraction: true,
         vibrate: [200, 100, 200, 100, 200],
         actions: [
-          { action: 'open', title: '📂 OPEN' },
+          { action: 'close', title: '❌ CLOSE' },
           { action: 'snooze_5', title: '⏱ 5 MIN' },
           { action: 'snooze_15', title: '⏱ 15 MIN' },
-          { action: 'snooze_60', title: '⏱ 1 HOUR' },
-          { action: 'close', title: '❌ CLOSE' }
+          { action: 'snooze_60', title: '⏱ 1 HOUR' }
         ]
       } as any);
     }
@@ -322,6 +321,26 @@ export default function RemindersPage() {
       }
     } catch (err: any) {
       Swal.fire({ icon: 'error', title: 'Error Cloud Push', text: err.message });
+    }
+  };
+
+  const handleEmergencyCleanup = async () => {
+    try {
+      const res = await fetch('/api/dev/reminders/cleanup', { method: 'POST' });
+      const data = await res.json();
+      if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+        const reg = await navigator.serviceWorker.ready;
+        reg.active?.postMessage({ type: 'SW_CLEANUP_TEST_NOTIFICATIONS' });
+      }
+      await fetchReminders();
+      Swal.fire({
+        icon: 'success',
+        title: 'Emergency Cleanup Berhasil!',
+        text: 'Seluruh test reminder lama telah dibatalkan & notifikasi aktif dibersihkan.',
+        confirmButtonText: 'OK'
+      });
+    } catch (err: any) {
+      Swal.fire({ icon: 'error', title: 'Gagal Cleanup', text: err.message });
     }
   };
 
@@ -508,7 +527,7 @@ export default function RemindersPage() {
             </div>
 
             {/* Diagnostic Action Buttons */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-amber-500/20">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 pt-1 border-t border-amber-500/20">
               <button
                 onClick={testScheduledReminder30s}
                 className="px-4 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
@@ -518,17 +537,25 @@ export default function RemindersPage() {
               </button>
 
               <button
-                onClick={testForegroundNotification}
-                className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2"
-              >
-                <Monitor className="w-4 h-4 text-blue-400" /> Uji Sticky Notification
-              </button>
-
-              <button
                 onClick={testServerCloudPush}
                 className="px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2"
               >
-                <Send className="w-4 h-4 text-purple-400" /> Uji Direct Cloud Push
+                <Send className="w-4 h-4 text-purple-400" /> Uji Cloud Push
+              </button>
+
+              <button
+                onClick={testForegroundNotification}
+                className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-xl font-semibold text-xs transition-all flex items-center justify-center gap-2"
+              >
+                <Monitor className="w-4 h-4 text-blue-400" /> Sticky Notification
+              </button>
+
+              <button
+                onClick={handleEmergencyCleanup}
+                className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/40 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
+                title="Batalkan seluruh test reminder lama di DB & bersihkan notifikasi aktif"
+              >
+                <Trash2 className="w-4 h-4 text-red-400" /> Cleanup Test Reminders
               </button>
             </div>
           </div>

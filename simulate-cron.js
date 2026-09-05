@@ -1,9 +1,12 @@
 const http = require('http');
 
+const PID = process.pid;
+const INSTANCE_ID = "local-dev";
+
 console.log("==========================================================");
-console.log(" [REMINDER] Local Development Scheduler Runner Active");
-console.log(" Polling /api/push/cron every 10 seconds");
-console.log(" Make sure 'npm run dev' is running on http://localhost:3000");
+console.log(` [SCHEDULER] Instance=${INSTANCE_ID} PID=${PID}`);
+console.log(` [SCHEDULER] Single process polling active for /api/push/cron`);
+console.log(` Polling interval: 10 seconds`);
 console.log(" Press Ctrl+C to stop.");
 console.log("==========================================================\n");
 
@@ -18,24 +21,24 @@ function triggerCron() {
       try {
         const data = JSON.parse(rawData);
         if (data.foundCount > 0) {
-          console.log(`[REMINDER Scheduler ${timeStr}] 🎯 FOUND & PROCESSED: ${data.foundCount} due reminders! Success Push: ${data.successPushCount}`);
+          console.log(`[SCHEDULER PID=${PID} ${timeStr}] 🎯 FOUND & PROCESSED: ${data.foundCount} due reminders! Success Push: ${data.successPushCount}`);
           if (data.logs && Array.isArray(data.logs)) {
             data.logs.forEach(l => console.log(`   ${l}`));
           }
         } else {
-          console.log(`[REMINDER Scheduler ${timeStr}] Checked - No due reminders. (Timestamp: ${data.checkedAt})`);
+          console.log(`[SCHEDULER PID=${PID} ${timeStr}] Checked - No due reminders. (Timestamp: ${data.checkedAt})`);
         }
       } catch (e) {
-        console.log(`[REMINDER Scheduler ${timeStr}] Response:`, rawData);
+        console.log(`[SCHEDULER PID=${PID} ${timeStr}] Response:`, rawData);
       }
     });
   }).on('error', (err) => {
-    console.error(`[REMINDER Scheduler ${timeStr}] ❌ Failed to reach http://localhost:3000 (Ensure 'npm run dev' is running): ${err.message}`);
+    console.error(`[SCHEDULER PID=${PID} ${timeStr}] ❌ Failed to reach http://localhost:3000: ${err.message}`);
   });
 }
 
 // Initial trigger
 triggerCron();
 
-// Poll every 10 seconds for local development
+// Single interval instance
 setInterval(triggerCron, 10000);

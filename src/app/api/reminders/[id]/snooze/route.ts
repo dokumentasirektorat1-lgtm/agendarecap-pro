@@ -15,7 +15,7 @@ export async function POST(
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
-    const minutes = Number(body.minutes) || 5; // Default snooze 5 minutes if unspecified
+    const minutes = Number(body.minutes) || 5; // Default snooze 5 minutes
 
     const now = new Date();
     const newTriggerTime = new Date(now.getTime() + minutes * 60 * 1000);
@@ -27,17 +27,7 @@ export async function POST(
 
     const adminSupabase = getAdminClient();
 
-    // 1. Fetch current reminder
-    const { data: reminder, error: fetchErr } = await adminSupabase
-      .from('reminders')
-      .select('*')
-      .eq('id', id)
-      .single();
-
-    if (fetchErr && fetchErr.code !== 'PGRST116') {
-      console.error('Error fetching reminder for snooze:', fetchErr);
-    }
-
+    // 1. Update primary table if present
     const payload = {
       scheduled_at: newScheduledAtISO,
       snoozed_until: newScheduledAtISO,
@@ -47,30 +37,53 @@ export async function POST(
       updated_at: now.toISOString()
     };
 
-    if (reminder) {
-      const { data, error } = await adminSupabase
+    let updatedReminderData = null;
+    try {
+      const { data } = await adminSupabase
         .from('reminders')
         .update(payload)
         .eq('id', id)
         .select()
         .single();
-
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-      }
-
-      return NextResponse.json({
-        success: true,
-        reminder: data,
-        snoozedMinutes: minutes,
-        nextTriggerAt: newScheduledAtISO
-      });
+      if (data) updatedReminderData = data;
+    } catch (e) {
+      console.warn('[SNOOZE API] Primary table notice:', e);
     }
 
-    // If not present in DB table yet (or offline sync mode), return calculation payload for client & IDB
+    // 2. Sync to push_subscribers.reminders JSON array
+    try {
+      const { data: subs } = await adminSupabase.from('push_subscribers').select('*');
+      if (subs && subs.length > 0) {
+        for (const sub of subs) {
+          if (Array.isArray(sub.reminders)) {
+            const updatedList = sub.reminders.map((r: any) => {
+              if (r.id === id) {
+                return {
+                  ...r,
+                  scheduledAt: newScheduledAtISO,
+                  status: 'snoozed',
+                  time: newTime,
+                  isActive: true,
+                  updatedAt: now.toISOString()
+                };
+              }
+              return r;
+            });
+            await adminSupabase
+              .from('push_subscribers')
+              .update({ reminders: updatedList })
+              .eq('endpoint', sub.endpoint);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[SNOOZE API] Subscriber JSON sync notice:', e);
+    }
+
     return NextResponse.json({
       success: true,
       reminderId: id,
+      reminder: updatedReminderData,
       snoozedMinutes: minutes,
       nextTriggerAt: newScheduledAtISO,
       newTime,

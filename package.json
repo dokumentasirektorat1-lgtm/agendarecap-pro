@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "scheduler:dev": "node simulate-cron.js",
+    "reminders:cleanup-test": "node scripts/cleanup-test.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"

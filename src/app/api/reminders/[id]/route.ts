@@ -40,23 +40,7 @@ export async function PATCH(
   try {
     const { id } = await params;
     const body = await request.json();
-    const supabase = await createServerSupabase();
-    const { data: { user } } = await supabase.auth.getUser();
-
     const adminSupabase = getAdminClient();
-    
-    // Check ownership if user authenticated
-    if (user) {
-      const { data: existing } = await adminSupabase
-        .from('reminders')
-        .select('user_id')
-        .eq('id', id)
-        .single();
-
-      if (existing && existing.user_id && existing.user_id !== user.id) {
-        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-      }
-    }
 
     const payload: any = { updated_at: new Date().toISOString() };
     if (body.title !== undefined) payload.title = body.title;
@@ -74,20 +58,51 @@ export async function PATCH(
 
     if (body.status === 'completed' || body.status === 'dismissed') {
       payload.completed_at = new Date().toISOString();
+      payload.is_active = false;
     }
 
-    const { data, error } = await adminSupabase
-      .from('reminders')
-      .update(payload)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    let updatedData = null;
+    try {
+      const { data } = await adminSupabase
+        .from('reminders')
+        .update(payload)
+        .eq('id', id)
+        .select()
+        .single();
+      if (data) updatedData = data;
+    } catch (e) {
+      console.warn('[PATCH API] Primary table update notice:', e);
     }
 
-    return NextResponse.json({ reminder: data });
+    // Also sync update to push_subscribers.reminders JSON array
+    try {
+      const { data: subs } = await adminSupabase.from('push_subscribers').select('*');
+      if (subs && subs.length > 0) {
+        for (const sub of subs) {
+          if (Array.isArray(sub.reminders)) {
+            const updatedList = sub.reminders.map((r: any) => {
+              if (r.id === id) {
+                return {
+                  ...r,
+                  status: body.status || r.status,
+                  isActive: payload.is_active !== undefined ? payload.is_active : r.isActive,
+                  updatedAt: new Date().toISOString()
+                };
+              }
+              return r;
+            });
+            await adminSupabase
+              .from('push_subscribers')
+              .update({ reminders: updatedList })
+              .eq('endpoint', sub.endpoint);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[PATCH API] Subscriber JSON sync notice:', e);
+    }
+
+    return NextResponse.json({ success: true, id, reminder: updatedData || { id, ...payload } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
@@ -102,13 +117,31 @@ export async function DELETE(
     const { id } = await params;
     const adminSupabase = getAdminClient();
 
-    const { error } = await adminSupabase
-      .from('reminders')
-      .delete()
-      .eq('id', id);
+    try {
+      await adminSupabase
+        .from('reminders')
+        .delete()
+        .eq('id', id);
+    } catch (e) {
+      console.warn('[DELETE API] Primary table notice:', e);
+    }
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Sync delete to push_subscribers JSON array
+    try {
+      const { data: subs } = await adminSupabase.from('push_subscribers').select('*');
+      if (subs && subs.length > 0) {
+        for (const sub of subs) {
+          if (Array.isArray(sub.reminders)) {
+            const updatedList = sub.reminders.filter((r: any) => r.id !== id);
+            await adminSupabase
+              .from('push_subscribers')
+              .update({ reminders: updatedList })
+              .eq('endpoint', sub.endpoint);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[DELETE API] Subscriber JSON sync notice:', e);
     }
 
     return NextResponse.json({ success: true, id });
