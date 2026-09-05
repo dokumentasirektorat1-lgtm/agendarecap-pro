@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import { getRemindersFromIDB, getOccurrencesFromIDB, saveRemindersToIDB, saveOccurrencesToIDB, updateSingleReminderInIDB, updateOccurrenceInIDB, deleteReminderFromIDB, addToOfflineQueue, IDBReminder, IDBOccurrence } from "@/lib/idb";
 import { runSyncEngine, initSyncEngineListeners } from "@/lib/sync-engine";
 import { getUTCISOFromLocal } from "@/lib/timezone";
+import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm, initNativeAlarmListeners } from "@/lib/native-alarm";
 
 export type Frequency = "once" | "daily" | "weekdays" | "weekly";
 export type OccurrenceStatus = "scheduled" | "processing" | "sent" | "snoozed" | "completed" | "dismissed" | "cancelled" | "failed";
@@ -234,6 +235,17 @@ export const useReminderStore = create<ReminderStoreState>()(
         await updateSingleReminderInIDB(newReminder);
         await updateOccurrenceInIDB(newOccurrence);
 
+        // Schedule Native Android Local Alarm if native platform
+        if (isNativePlatform()) {
+          scheduleNativeLocalAlarm({
+            reminderId,
+            occurrenceId,
+            title: input.title.trim(),
+            body: input.body || '',
+            scheduledAt: scheduledAtISO
+          });
+        }
+
         // 2. Immediate Server Upload Sync
         const payload = {
           id: reminderId,
@@ -391,6 +403,16 @@ export const useReminderStore = create<ReminderStoreState>()(
         await updateSingleReminderInIDB(updatedReminderObj);
         await updateOccurrenceInIDB(newOccurrence);
 
+        if (isNativePlatform()) {
+          scheduleNativeLocalAlarm({
+            reminderId: id,
+            occurrenceId,
+            title: target.title,
+            body: target.body,
+            scheduledAt: nextScheduledISO
+          });
+        }
+
         // Upload to server
         const payload = {
           id,
@@ -459,6 +481,17 @@ export const useReminderStore = create<ReminderStoreState>()(
         const occToSave = updatedOccs.find(o => o.reminderId === reminderId);
         if (occToSave) await updateOccurrenceInIDB(occToSave);
 
+        if (isNativePlatform()) {
+          const targetRem = get().reminders.find(r => r.id === reminderId);
+          scheduleNativeLocalAlarm({
+            reminderId,
+            occurrenceId: occurrenceId || 'unknown',
+            title: targetRem?.title || 'Pengingat AgendaRecap',
+            body: targetRem?.body || '',
+            scheduledAt: snoozeISO
+          });
+        }
+
         // 2. Server Sync or Queue
         const payload = { reminderId, occurrenceId, minutes };
         if (typeof navigator !== 'undefined' && navigator.onLine) {
@@ -504,6 +537,10 @@ export const useReminderStore = create<ReminderStoreState>()(
 
         const occToSave = updatedOccs.find(o => o.reminderId === reminderId);
         if (occToSave) await updateOccurrenceInIDB(occToSave);
+
+        if (isNativePlatform() && occurrenceId) {
+          cancelNativeLocalAlarm(occurrenceId);
+        }
 
         // 2. Server Sync or Queue
         const payload = { reminderId, occurrenceId, status: 'completed' };

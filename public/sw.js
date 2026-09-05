@@ -1,12 +1,13 @@
-// Service Worker for AgendaRecap / Agendaku PWA
+// Service Worker for AgendaRecap Pro PWA
 // Offline Shell Caching, Web Push Notification Engine, & Strict Action Handling (CLOSE, SNOOZE 5m/15m/1h)
-// VERSION: v4 (Offline-First Hybrid Engine & Zero-OPEN Action Model)
+// VERSION: v5 (Hybrid Alarm Engine, Cache Version Cleanup & Tag Standard)
 
-const CACHE_NAME = 'agendaku-pwa-v4';
+const CACHE_NAME = 'agendaku-pwa-v5';
 const STATIC_ASSETS = [
   '/',
   '/reminders',
   '/diagnostics',
+  '/settings/notifications',
   '/manifest.json',
   '/icon.svg'
 ];
@@ -16,20 +17,20 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('[SW v4] Pre-caching static shell failed:', err);
+        console.warn('[SW v5] Pre-caching static shell failed:', err);
       });
     }).then(() => self.skipWaiting())
   );
 });
 
-// 2. Activate Event - Clean Up Stale Cache Versions & Claim Clients (Does NOT clear IndexedDB)
+// 2. Activate Event - Strict Cache Version Cleanup (Deletes v1, v2, v3, v4, etc.)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cache) => {
           if (cache !== CACHE_NAME) {
-            console.log('[SW v4] Deleting old cache version:', cache);
+            console.log('[SW v5] Deleting old cache version:', cache);
             return caches.delete(cache);
           }
         })
@@ -83,9 +84,9 @@ self.addEventListener('push', (event) => {
   const occurrenceId = data.occurrenceId || `occ-${Date.now()}`;
   const title = data.title || 'Pengingat AgendaRecap Pro';
   const body = data.body || 'Waktu pengingat Anda telah tiba!';
-  const notificationTag = data.notificationTag || `reminder-${reminderId}-occurrence-${occurrenceId}`;
+  const notificationTag = data.notificationTag || `agenda-${reminderId}-${occurrenceId}`;
 
-  console.log(`[SW v4] Push received: occurrenceId=${occurrenceId} reminderId=${reminderId} tag=${notificationTag}`);
+  console.log(`[SW v5] Push received: occurrenceId=${occurrenceId} reminderId=${reminderId} tag=${notificationTag}`);
 
   const options = {
     body,
@@ -104,8 +105,8 @@ self.addEventListener('push', (event) => {
     // STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE (5 MIN / 15 MIN / 1 HOUR)
     actions: [
       { action: 'close', title: '❌ CLOSE' },
-      { action: 'snooze_5', title: '⏱ 5 MIN' },
-      { action: 'snooze_15', title: '⏱ 15 MIN' },
+      { action: 'snooze_5', title: '⏱ SNOOZE 5 MIN' },
+      { action: 'snooze_15', title: '⏱ SNOOZE 15 MIN' },
       { action: 'snooze_60', title: '⏱ 1 HOUR' }
     ]
   };
@@ -122,7 +123,7 @@ self.addEventListener('notificationclick', (event) => {
   const reminderId = notificationData.reminderId || event.notification.tag.split('-')[1];
   const occurrenceId = notificationData.occurrenceId || 'unknown';
 
-  console.log(`[SW v4] Notification click: action=${action} occurrenceId=${occurrenceId} reminderId=${reminderId}`);
+  console.log(`[SW v5] Notification click: action=${action} occurrenceId=${occurrenceId} reminderId=${reminderId}`);
 
   // Handle Snooze Actions (5 MIN, 15 MIN, 1 HOUR)
   if (action === 'snooze_5' || action === 'snooze_15' || action === 'snooze_60') {
@@ -130,7 +131,7 @@ self.addEventListener('notificationclick', (event) => {
     if (action === 'snooze_15') minutes = 15;
     if (action === 'snooze_60') minutes = 60;
 
-    console.log(`[SW v4] Action SNOOZE: +${minutes} minutes for reminderId=${reminderId} occurrenceId=${occurrenceId}`);
+    console.log(`[SW v5] Action SNOOZE: +${minutes} minutes for reminderId=${reminderId} occurrenceId=${occurrenceId}`);
 
     event.waitUntil(
       fetch(`/api/reminders/${reminderId}/snooze`, {
@@ -149,14 +150,14 @@ self.addEventListener('notificationclick', (event) => {
           });
         });
       }).catch((err) => {
-        console.warn('[SW v4] Offline snooze sync warning:', err);
+        console.warn('[SW v5] Offline snooze sync warning:', err);
       })
     );
     return;
   }
 
   // Handle CLOSE Action or Body Click (Mark current occurrence completed)
-  console.log(`[SW v4] Action CLOSE: Marking reminderId=${reminderId} occurrenceId=${occurrenceId} completed`);
+  console.log(`[SW v5] Action CLOSE: Marking reminderId=${reminderId} occurrenceId=${occurrenceId} completed`);
 
   event.waitUntil(
     fetch(`/api/reminders/${reminderId}`, {
@@ -174,7 +175,7 @@ self.addEventListener('notificationclick', (event) => {
         });
       });
     }).catch((err) => {
-      console.warn('[SW v4] Offline close sync warning:', err);
+      console.warn('[SW v5] Offline close sync warning:', err);
     })
   );
 });
@@ -185,7 +186,7 @@ self.addEventListener('notificationclose', (event) => {
   const reminderId = notificationData.reminderId || event.notification.tag.split('-')[1];
   const occurrenceId = notificationData.occurrenceId || 'unknown';
 
-  console.log(`[SW v4] Notification closed (X pressed): occurrenceId=${occurrenceId} reminderId=${reminderId}`);
+  console.log(`[SW v5] Notification closed (X pressed): occurrenceId=${occurrenceId} reminderId=${reminderId}`);
 
   // Mark occurrence completed/dismissed so it will NEVER trigger or loop again
   event.waitUntil(
@@ -194,7 +195,7 @@ self.addEventListener('notificationclose', (event) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'dismissed', occurrenceId })
     }).catch((err) => {
-      console.warn('[SW v4] Notification close sync warning:', err);
+      console.warn('[SW v5] Notification close sync warning:', err);
     })
   );
 });
@@ -206,12 +207,12 @@ self.addEventListener('message', (event) => {
       self.registration.getNotifications().then((notifications) => {
         let closedCount = 0;
         notifications.forEach((notification) => {
-          if (notification.tag && (notification.tag.includes('test') || notification.tag.includes('reminder'))) {
+          if (notification.tag && (notification.tag.includes('test') || notification.tag.includes('reminder') || notification.tag.includes('agenda'))) {
             notification.close();
             closedCount++;
           }
         });
-        console.log(`[SW v4] Emergency Cleanup: Closed ${closedCount} active notifications`);
+        console.log(`[SW v5] Emergency Cleanup: Closed ${closedCount} active notifications`);
       })
     );
   }

@@ -64,27 +64,16 @@ export async function POST(
       }
     }
 
-    // Also update parent reminder time display for legacy views
-    try {
-      await adminSupabase
-        .from('reminders')
-        .update({
-          time: newTime,
-          is_active: true,
-          updated_at: now.toISOString()
-        })
-        .eq('id', reminderId);
-    } catch (e) {
-      console.warn('[SNOOZE API] Reminder parent update notice:', e);
-    }
+    // NEVER update parent reminders.time during snooze!
+    // Master schedule (e.g. 08:00) must remain strictly unchanged.
+    // Snooze ONLY applies to the active occurrence (snoozed_until).
 
     return NextResponse.json({
       success: true,
       reminderId,
       occurrenceId,
       snoozedMinutes: minutes,
-      snoozedUntil: newScheduledAtISO,
-      newTime
+      snoozedUntil: newScheduledAtISO
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

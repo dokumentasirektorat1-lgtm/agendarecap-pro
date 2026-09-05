@@ -2,10 +2,16 @@
 
 import { useEffect } from "react";
 import { initSyncEngineListeners } from "@/lib/sync-engine";
+import { initNativeAlarmListeners } from "@/lib/native-alarm";
 
 export default function ServiceWorkerRegistration() {
   useEffect(() => {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+    if (typeof window === 'undefined') return;
+
+    // Initialize Native Alarm Listeners (Android Capacitor OS Action Buttons)
+    initNativeAlarmListeners();
+
+    if (!('serviceWorker' in navigator)) return;
 
     // Initialize Global Sync Engine Listeners (online event, visibility change)
     initSyncEngineListeners();

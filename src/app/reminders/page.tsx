@@ -7,6 +7,7 @@ import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, 
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
+import { downloadICSFile, generateGoogleCalendarUrl } from "@/lib/calendar-service";
 
 export default function RemindersPage() {
   const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, reactivateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
@@ -611,11 +612,33 @@ export default function RemindersPage() {
                       </div>
                     )}
 
-                    {/* Card Footer with Edit & Delete */}
+                    {/* Card Footer with Calendar Export, Edit & Delete */}
                     <div className="flex justify-between items-center pt-1">
-                      <span className="text-[10px] text-zinc-500">
-                        {reminder.createdAt ? `Created: ${new Date(reminder.createdAt).toLocaleDateString('id-ID')}` : ''}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          onClick={() => {
+                            if (occ?.scheduledAt) {
+                              downloadICSFile({ title: reminder.title, body: reminder.body, scheduledAt: occ.scheduledAt });
+                            }
+                          }}
+                          className="px-2 py-1 bg-white/5 hover:bg-white/10 text-zinc-300 rounded-md text-[10px] font-semibold border border-white/10 flex items-center gap-1 transition-all"
+                          title="Download file .ICS Kalender"
+                        >
+                          <Calendar className="w-3 h-3 text-blue-400" />
+                          <span>.ICS</span>
+                        </button>
+                        <a
+                          href={occ?.scheduledAt ? generateGoogleCalendarUrl({ title: reminder.title, body: reminder.body, scheduledAt: occ.scheduledAt }) : '#'}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-2 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 rounded-md text-[10px] font-semibold border border-blue-500/20 flex items-center gap-1 transition-all"
+                          title="Buka di Google Calendar"
+                        >
+                          <Calendar className="w-3 h-3 text-blue-400" />
+                          <span>Google Cal</span>
+                        </a>
+                      </div>
+
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => handleEdit(reminder)}
