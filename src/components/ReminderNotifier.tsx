@@ -79,7 +79,7 @@ export default function ReminderNotifier() {
     };
   }, [snoozeOccurrence, completeOccurrence]);
 
-  // Foreground active tab timer check (Runs every 30s when tab is active)
+  // Foreground active tab timer check (Runs every 15s when tab is open)
   useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
@@ -87,7 +87,12 @@ export default function ReminderNotifier() {
       reminders.forEach(r => {
         if (!r.isActive) return;
 
-        const activeOcc = r.currentOccurrence || occurrences.find(o => o.reminderId === r.id && (o.status === 'scheduled' || o.status === 'snoozed'));
+        // STRICT CHECK: ONLY trigger for occurrences that are actively 'scheduled' or 'snoozed'
+        // NEVER trigger for 'completed', 'dismissed', 'sent', or 'failed'
+        const activeOcc = occurrences.find(o => 
+          o.reminderId === r.id && (o.status === 'scheduled' || o.status === 'snoozed')
+        );
+
         if (!activeOcc) return;
 
         let scheduledTime = 0;
@@ -106,7 +111,7 @@ export default function ReminderNotifier() {
 
           playSound(r.sound || 'default');
 
-          // Sticky In-App Modal with Title & Body Detail (Catatan/Detail)
+          // Sticky In-App Modal with Title & Body Detail
           Swal.fire({
             title: r.title,
             text: r.body || `Waktu pengingat Anda (${r.time}) telah tiba!`,

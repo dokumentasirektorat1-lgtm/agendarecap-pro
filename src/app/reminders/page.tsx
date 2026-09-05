@@ -3,13 +3,13 @@
 import { useState, useEffect } from "react";
 import { useReminderStore, Frequency, ReminderItem } from "@/store/useReminderStore";
 import { getUTCISOFromLocal, formatLocalFromUTC } from "@/lib/timezone";
-import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Send, Check, BellOff, Terminal, Play } from "lucide-react";
+import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Send, Check, BellOff, Terminal, Play, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 
 export default function RemindersPage() {
-  const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
+  const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, reactivateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
 
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -169,6 +169,18 @@ export default function RemindersPage() {
     setFrequency(reminder.frequency || "once");
     setSound(reminder.sound || "default");
     setIsAdding(true);
+  };
+
+  const handleReactivate = async (id: string) => {
+    await reactivateReminder(id);
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: 'Pengingat Diaktifkan Kembali!',
+      showConfirmButton: false,
+      timer: 1500
+    });
   };
 
   const handleAddOrUpdate = async (e: React.FormEvent) => {
@@ -473,7 +485,7 @@ export default function RemindersPage() {
                   className={`glass p-5 rounded-[1.8rem] border flex flex-col relative overflow-hidden transition-all ${
                     isSnoozed ? 'border-amber-500/40 bg-amber-500/5' :
                     isProcessing ? 'border-blue-500/40 bg-blue-500/5 animate-pulse' :
-                    isCompleted ? 'border-white/5 opacity-65' :
+                    isCompleted ? 'border-white/5 opacity-65 bg-zinc-900/30' :
                     'border-white/10 hover:border-blue-500/30'
                   }`}
                 >
@@ -505,6 +517,11 @@ export default function RemindersPage() {
                             SENT
                           </span>
                         )}
+                        {isCompleted && (
+                          <span className="px-2 py-0.5 bg-zinc-700/50 text-zinc-400 text-[10px] font-bold rounded-full border border-zinc-600/30">
+                            SELESAI
+                          </span>
+                        )}
                       </div>
                       {reminder.body && (
                         <p className="text-xs text-zinc-300 mt-1 italic font-mono bg-white/5 p-2 rounded-lg border border-white/5">
@@ -516,13 +533,13 @@ export default function RemindersPage() {
                     <button
                       onClick={() => toggleReminder(reminder.id)}
                       className={`relative inline-flex h-5 w-10 shrink-0 items-center rounded-full transition-colors ${
-                        reminder.isActive ? "bg-blue-500" : "bg-zinc-700"
+                        reminder.isActive && !isCompleted ? "bg-blue-500" : "bg-zinc-700"
                       }`}
-                      title={reminder.isActive ? "Nonaktifkan" : "Aktifkan"}
+                      title={isCompleted ? "Aktifkan Kembali" : reminder.isActive ? "Nonaktifkan" : "Aktifkan"}
                     >
                       <span
                         className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                          reminder.isActive ? "translate-x-5" : "translate-x-1"
+                          reminder.isActive && !isCompleted ? "translate-x-5" : "translate-x-1"
                         }`}
                       />
                     </button>
@@ -548,7 +565,7 @@ export default function RemindersPage() {
                     {/* Occurrence UTC Timestamp */}
                     <div className="text-[10px] font-mono text-zinc-500 bg-white/5 p-1.5 rounded-lg flex items-center justify-between">
                       <span>Scheduled: {occ?.scheduledAt ? formatLocalFromUTC(occ.scheduledAt, reminder.timezone) : 'N/A'}</span>
-                      <span className="text-amber-400 font-bold">{occ?.status ? occ.status.toUpperCase() : 'SCHEDULED'}</span>
+                      <span className={`font-bold ${isCompleted ? 'text-zinc-400' : 'text-amber-400'}`}>{occ?.status ? occ.status.toUpperCase() : 'SCHEDULED'}</span>
                     </div>
 
                     {/* Quick Snooze & Close Actions */}
@@ -578,6 +595,18 @@ export default function RemindersPage() {
                           title="CLOSE / Dismiss"
                         >
                           <Check className="w-3.5 h-3.5" /> CLOSE
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Reactivate Action Button for Completed Reminders */}
+                    {isCompleted && (
+                      <div className="pt-1">
+                        <button
+                          onClick={() => handleReactivate(reminder.id)}
+                          className="w-full py-2 px-3 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> Aktifkan Kembali Pengingat Ini
                         </button>
                       </div>
                     )}

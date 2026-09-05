@@ -54,6 +54,7 @@ interface ReminderStoreState {
     sound?: string;
     daysOfWeek?: number[];
   }) => Promise<void>;
+  reactivateReminder: (id: string) => Promise<void>;
   snoozeOccurrence: (reminderId: string, occurrenceId: string, minutes: number) => Promise<void>;
   completeOccurrence: (reminderId: string, occurrenceId: string) => Promise<void>;
   deleteReminder: (id: string) => Promise<void>;
@@ -341,6 +342,92 @@ export const useReminderStore = create<ReminderStoreState>()(
         }
       },
 
+      reactivateReminder: async (id) => {
+        const target = get().reminders.find(r => r.id === id);
+        if (!target) return;
+
+        const now = new Date();
+        const userTimezone = target.timezone || "Asia/Jakarta";
+        const todayStr = now.toISOString().split("T")[0];
+
+        // Calculate next upcoming execution time
+        let nextScheduledISO = getUTCISOFromLocal(todayStr, target.time || "08:00", userTimezone);
+        if (new Date(nextScheduledISO).getTime() <= now.getTime()) {
+          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+          const tomorrowStr = tomorrow.toISOString().split("T")[0];
+          nextScheduledISO = getUTCISOFromLocal(tomorrowStr, target.time || "08:00", userTimezone);
+        }
+
+        const occurrenceId = crypto.randomUUID();
+        const newOccurrence: IDBOccurrence = {
+          id: occurrenceId,
+          reminderId: id,
+          scheduledAt: nextScheduledISO,
+          status: 'scheduled',
+          notificationTag: `reminder-${id}-occurrence-${occurrenceId}`,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString()
+        };
+
+        const updatedReminderObj: IDBReminder = {
+          ...target,
+          isActive: true,
+          updatedAt: now.toISOString()
+        };
+
+        // Filter out old completed occurrences for this reminder and attach new active scheduled occurrence
+        const filteredOccs = get().occurrences.filter(o => o.reminderId !== id);
+        const updatedOccurrences = [...filteredOccs, newOccurrence];
+
+        const updatedReminders = get().reminders.map(r => {
+          if (r.id === id) {
+            return { ...updatedReminderObj, currentOccurrence: newOccurrence };
+          }
+          return r;
+        });
+
+        set({ reminders: updatedReminders, occurrences: updatedOccurrences });
+
+        await updateSingleReminderInIDB(updatedReminderObj);
+        await updateOccurrenceInIDB(newOccurrence);
+
+        // Upload to server
+        const payload = {
+          id,
+          isActive: true,
+          scheduledAt: nextScheduledISO
+        };
+
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          try {
+            await fetch(`/api/reminders/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'scheduled', isActive: true, occurrenceId })
+            });
+
+            // Also ensure reminder record is posted if missing
+            await fetch('/api/reminders', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id,
+                title: target.title,
+                body: target.body,
+                time: target.time,
+                scheduledAt: nextScheduledISO,
+                timezone: userTimezone,
+                frequency: target.frequency
+              })
+            });
+          } catch (e) {
+            await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
+          }
+        } else {
+          await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
+        }
+      },
+
       snoozeOccurrence: async (reminderId, occurrenceId, minutes) => {
         const now = new Date();
         const snoozeDate = new Date(now.getTime() + minutes * 60 * 1000);
@@ -457,8 +544,18 @@ export const useReminderStore = create<ReminderStoreState>()(
       toggleReminder: async (id) => {
         const target = get().reminders.find(r => r.id === id);
         if (!target) return;
-        const newActiveState = !target.isActive;
 
+        const occ = target.currentOccurrence;
+        const isCurrentlyCompleted = occ?.status === 'completed' || occ?.status === 'dismissed';
+
+        // If reminder is completed and user toggles it back ON, reactivate it with a new scheduled occurrence
+        if (!target.isActive || isCurrentlyCompleted) {
+          await get().reactivateReminder(id);
+          return;
+        }
+
+        // Toggle OFF (Deactivate)
+        const newActiveState = false;
         const updatedReminders = get().reminders.map(r => 
           r.id === id ? { ...r, isActive: newActiveState } : r
         );
