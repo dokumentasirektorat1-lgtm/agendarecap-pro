@@ -84,16 +84,20 @@
   </div>
 
   <script>
+    console.log('[AgendaRecap][Lifecycle] Offline fallback shell loaded');
+
     function checkConnection() {
+      console.log('[AgendaRecap][Lifecycle] Manual connection check triggered');
       if (navigator.onLine) {
-        window.location.href = "https://agendarecap.vercel.app";
+        window.location.replace("https://agendarecap.vercel.app");
       } else {
-        alert("Perangkat Anda masih offline. Pengingat lokal tetap terjadwal secara native.");
+        alert("Perangkat Anda masih offline. Seluruh pengingat lokal tetap tersimpan dan terjadwal secara native.");
       }
     }
 
     window.addEventListener('online', function() {
-      window.location.href = "https://agendarecap.vercel.app";
+      console.log('[AgendaRecap][Lifecycle] Network connection restored (online event)');
+      window.location.replace("https://agendarecap.vercel.app");
     });
   </script>
 </body>
