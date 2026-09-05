@@ -3,7 +3,7 @@
 import { useStore, Agenda } from "@/store/useStore";
 import { format, isSameDay } from "date-fns";
 import { id } from "date-fns/locale";
-import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing, Menu } from "lucide-react";
+import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing, Menu, Download } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
 import Swal from "sweetalert2";
@@ -301,21 +301,30 @@ export default function Dashboard() {
             </div>
             
             {/* Primary Quick Actions Bar (Frequently Used) */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <Link 
                 href="/consultation"
                 className="flex items-center justify-center gap-2 px-3 py-2.5 bg-orange-500/10 hover:bg-orange-500/20 border border-orange-500/20 rounded-xl transition-all text-orange-200 hover:text-white group text-xs font-semibold"
               >
                 <Shield className="w-4 h-4 text-orange-400 shrink-0" />
-                <span>Konsultasi</span>
+                <span className="truncate">Konsultasi</span>
               </Link>
               <Link 
                 href="/reminders"
                 className="flex items-center justify-center gap-2 px-3 py-2.5 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-xl transition-all text-blue-200 hover:text-white group text-xs font-semibold"
               >
                 <BellRing className="w-4 h-4 text-blue-400 shrink-0" />
-                <span>Pengingat</span>
+                <span className="truncate">Pengingat</span>
               </Link>
+              <a
+                href="/downloads/AgendaRecap_Pro_v0.1.0.apk"
+                download="AgendaRecap_Pro_v0.1.0.apk"
+                className="flex items-center justify-center gap-2 px-3 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-xl transition-all text-emerald-200 hover:text-white group text-xs font-semibold"
+                title="Download File APK Android AgendaRecap Pro v0.1.0"
+              >
+                <Download className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span className="truncate">APK v0.1.0</span>
+              </a>
             </div>
           </header>
 

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useReminderStore, Frequency, ReminderItem } from "@/store/useReminderStore";
 import { getUTCISOFromLocal, formatLocalFromUTC } from "@/lib/timezone";
-import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Send, Check, BellOff, Terminal, Play, RotateCcw } from "lucide-react";
+import { Bell, BellRing, Plus, Trash2, ArrowLeft, Clock, Calendar, ShieldAlert, Edit2, RefreshCw, Zap, CheckCircle2, AlertTriangle, Send, Check, BellOff, Terminal, Play, RotateCcw, Download } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
@@ -270,6 +270,16 @@ export default function RemindersPage() {
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+            <a
+              href="/downloads/AgendaRecap_Pro_v0.1.0.apk"
+              download="AgendaRecap_Pro_v0.1.0.apk"
+              className="p-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-bold"
+              title="Download APK AgendaRecap Pro v0.1.0"
+            >
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span className="hidden sm:inline">Download APK</span>
+            </a>
+
             <button
               onClick={handleTriggerCronServer}
               disabled={isTestingCron}

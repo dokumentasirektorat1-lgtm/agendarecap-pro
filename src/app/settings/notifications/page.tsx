@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, ShieldAlert, CheckCircle2, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, Bell, Calendar, Clock, AlertCircle, Play, XCircle, Wrench } from "lucide-react";
+import { ArrowLeft, ShieldAlert, CheckCircle2, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, Bell, Calendar, Clock, AlertCircle, Play, XCircle, Wrench, Download } from "lucide-react";
 import Link from "next/link";
 import Swal from "sweetalert2";
 import { getRemindersFromIDB, getOccurrencesFromIDB, getOfflineQueue } from "@/lib/idb";
@@ -380,7 +380,7 @@ export default function NotificationSettingsPage() {
       <div className="relative z-10 max-w-4xl mx-auto flex flex-col gap-6">
 
         {/* Header */}
-        <header className="flex items-center justify-between glass p-4 sm:p-6 rounded-[2rem] border border-amber-500/20 shadow-2xl">
+        <header className="flex flex-col sm:flex-row items-start sm:items-center justify-between glass p-4 sm:p-6 rounded-[2rem] border border-amber-500/20 shadow-2xl gap-4">
           <div className="flex items-center gap-4">
             <Link
               href="/reminders"
@@ -397,14 +397,26 @@ export default function NotificationSettingsPage() {
             </div>
           </div>
 
-          <button
-            onClick={runDiagnosticCheck}
-            disabled={isRefreshing}
-            className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">REFRESH STATUS</span>
-          </button>
+          <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <a
+              href="/downloads/AgendaRecap_Pro_v0.1.0.apk"
+              download="AgendaRecap_Pro_v0.1.0.apk"
+              className="px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-black shadow-lg shadow-emerald-500/10"
+              title="Download File APK Android AgendaRecap Pro v0.1.0"
+            >
+              <Download className="w-4 h-4 text-emerald-400" />
+              <span>DOWNLOAD APK (v0.1.0)</span>
+            </a>
+
+            <button
+              onClick={runDiagnosticCheck}
+              disabled={isRefreshing}
+              className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">REFRESH</span>
+            </button>
+          </div>
         </header>
 
         {/* Exact Alarm Permission Banner */}

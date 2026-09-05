@@ -9,6 +9,7 @@ const config: CapacitorConfig = {
     cleartext: true,
     androidScheme: 'https',
     hostname: 'agendarecap.vercel.app',
+    errorPath: 'index.html',
     allowNavigation: [
       'agendarecap.vercel.app',
       '*.vercel.app',

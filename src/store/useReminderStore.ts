@@ -77,8 +77,50 @@ export const useReminderStore = create<ReminderStoreState>()(
 
         // 1. Instant local IndexedDB load
         try {
-          const localReminders = await getRemindersFromIDB();
-          const localOccurrences = await getOccurrencesFromIDB();
+          let localReminders = await getRemindersFromIDB();
+          let localOccurrences = await getOccurrencesFromIDB();
+
+          // Native Android Alarm Storage Reconciliation
+          if (isNativePlatform()) {
+            try {
+              const { getScheduledNativeAlarms } = await import('@/lib/native-alarm');
+              const scheduledNative = await getScheduledNativeAlarms();
+              const nativeOccurrenceMap = new Map<string, any>();
+              scheduledNative.forEach((item: any) => {
+                if (item && item.occurrenceId) {
+                  nativeOccurrenceMap.set(item.occurrenceId, item);
+                }
+              });
+
+              let hasLocalUpdates = false;
+              for (const occ of localOccurrences) {
+                if (occ.status === 'scheduled' || occ.status === 'snoozed') {
+                  const nativeItem = nativeOccurrenceMap.get(occ.id);
+                  if (nativeItem) {
+                    // Check if snoozed natively
+                    if (nativeItem.scheduledAtMs && Math.abs(new Date(occ.scheduledAt).getTime() - nativeItem.scheduledAtMs) > 1000) {
+                      occ.status = 'snoozed';
+                      occ.snoozedUntil = new Date(nativeItem.scheduledAtMs).toISOString();
+                      await updateOccurrenceInIDB(occ);
+                      hasLocalUpdates = true;
+                    }
+                  } else if (new Date(occ.scheduledAt).getTime() < Date.now() - 30000) {
+                    // Closed natively while app was terminated
+                    occ.status = 'completed';
+                    occ.completedAt = new Date().toISOString();
+                    await updateOccurrenceInIDB(occ);
+                    hasLocalUpdates = true;
+                  }
+                }
+              }
+
+              if (hasLocalUpdates) {
+                localOccurrences = await getOccurrencesFromIDB();
+              }
+            } catch (nativeErr) {
+              console.warn('[STORE] Native alarm reconciliation warning:', nativeErr);
+            }
+          }
 
           const mapped: ReminderItem[] = localReminders.map(r => {
             const activeOcc = localOccurrences.find(o => o.reminderId === r.id && (o.status === 'scheduled' || o.status === 'snoozed' || o.status === 'processing'));
