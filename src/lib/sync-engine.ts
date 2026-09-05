@@ -1,9 +1,79 @@
 // Offline Sync Engine for Agendaku PWA
 // Reconciles local IndexedDB offline queue with Supabase server via Union Merge Strategy
+// Also reconciles Android Native AlarmManager state with active occurrences
 
 import { getOfflineQueue, removeFromOfflineQueue, getRemindersFromIDB, getOccurrencesFromIDB, saveRemindersToIDB, saveOccurrencesToIDB, IDBReminder, IDBOccurrence } from '@/lib/idb';
+import { isNativePlatform, getScheduledNativeAlarms, scheduleNativeLocalAlarm, cancelNativeLocalAlarm } from '@/lib/native-alarm';
 
 let isSyncingInProgress = false;
+
+export async function reconcileNativeAlarmsWithIDB(): Promise<{ scheduled: number; cancelled: number }> {
+  if (!isNativePlatform()) return { scheduled: 0, cancelled: 0 };
+
+  let scheduled = 0;
+  let cancelled = 0;
+
+  try {
+    const localOccurrences = await getOccurrencesFromIDB();
+    const localReminders = await getRemindersFromIDB();
+    const scheduledNativeAlarms = await getScheduledNativeAlarms();
+
+    const nativeAlarmMap = new Map<string, any>();
+    scheduledNativeAlarms.forEach((item: any) => {
+      if (item && item.occurrenceId) {
+        nativeAlarmMap.set(item.occurrenceId, item);
+      }
+    });
+
+    const activeOccurrencesMap = new Map<string, IDBOccurrence>();
+
+    for (const occ of localOccurrences) {
+      const targetTimeStr = occ.snoozedUntil || occ.scheduledAt;
+      const targetTimeMs = new Date(targetTimeStr).getTime();
+      const nowMs = Date.now();
+
+      if ((occ.status === 'scheduled' || occ.status === 'snoozed') && targetTimeMs > nowMs) {
+        activeOccurrencesMap.set(occ.id, occ);
+
+        const nativeItem = nativeAlarmMap.get(occ.id);
+        const parentReminder = localReminders.find(r => r.id === occ.reminderId);
+
+        // Missing native alarm or trigger time drifted by > 2 seconds
+        if (!nativeItem || !nativeItem.scheduledAtMs || Math.abs(nativeItem.scheduledAtMs - targetTimeMs) > 2000) {
+          await scheduleNativeLocalAlarm({
+            reminderId: occ.reminderId,
+            occurrenceId: occ.id,
+            title: parentReminder?.title || 'Pengingat AgendaRecap',
+            body: parentReminder?.body || '',
+            sound: parentReminder?.sound || 'default',
+            scheduledAt: targetTimeStr
+          });
+          scheduled++;
+        }
+      } else {
+        // Occurrence is completed, dismissed, cancelled, or in the past
+        if (nativeAlarmMap.has(occ.id)) {
+          await cancelNativeLocalAlarm(occ.id);
+          cancelled++;
+        }
+      }
+    }
+
+    // Cancel orphan native alarms that are not in IDB occurrences
+    for (const [occurrenceId] of nativeAlarmMap.entries()) {
+      if (!activeOccurrencesMap.has(occurrenceId)) {
+        await cancelNativeLocalAlarm(occurrenceId);
+        cancelled++;
+      }
+    }
+
+    console.log(`[NATIVE SYNC] Reconciled native alarms: Scheduled=${scheduled}, Cancelled=${cancelled}`);
+  } catch (err) {
+    console.warn('[NATIVE SYNC] Native alarm reconciliation warning:', err);
+  }
+
+  return { scheduled, cancelled };
+}
 
 export async function runSyncEngine(): Promise<{ success: boolean; syncedCount: number; errors: string[] }> {
   if (typeof window === 'undefined' || !navigator.onLine) {
@@ -136,6 +206,10 @@ export async function runSyncEngine(): Promise<{ success: boolean; syncedCount: 
 
       console.log(`[SYNC] Reconciliation complete: Total Reminders=${mergedReminders.length}, Total Occurrences=${mergedOccurrences.length}`);
     }
+
+    // 3. Reconcile Android Native Alarms with updated IDB state
+    await reconcileNativeAlarmsWithIDB();
+
   } catch (err: any) {
     console.error('[SYNC] Global sync engine error:', err);
     errors.push(err.message);
@@ -173,3 +247,4 @@ export function initSyncEngineListeners() {
     runSyncEngine();
   }
 }
+

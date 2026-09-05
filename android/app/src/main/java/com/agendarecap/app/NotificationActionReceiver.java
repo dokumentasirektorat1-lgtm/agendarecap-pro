@@ -20,6 +20,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
         int notificationId = intent.getIntExtra("notificationId", 0);
         String title = intent.getStringExtra("title");
         String note = intent.getStringExtra("note");
+        String sound = intent.getStringExtra("sound");
 
         NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
         if (notificationId != 0) {
@@ -45,6 +46,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                     alarmIntent.putExtra("occurrenceId", occurrenceId);
                     alarmIntent.putExtra("title", title);
                     alarmIntent.putExtra("note", note);
+                    alarmIntent.putExtra("sound", sound);
 
                     int pendingIntentId = (occurrenceId != null) ? Math.abs(occurrenceId.hashCode()) : (int) System.currentTimeMillis();
 
@@ -68,6 +70,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                         json.put("occurrenceId", occurrenceId);
                         json.put("title", title);
                         json.put("note", note);
+                        json.put("sound", sound);
                         json.put("scheduledAtMs", snoozeTargetTimeMs);
                         AlarmStorage.saveAlarm(context, occurrenceId, json.toString());
                     }

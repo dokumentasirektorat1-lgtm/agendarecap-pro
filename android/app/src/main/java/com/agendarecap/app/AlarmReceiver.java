@@ -16,8 +16,8 @@ import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 
 public class AlarmReceiver extends BroadcastReceiver {
-    public static final String CHANNEL_ID = "agendarecap_reminder_channel";
-    public static final String CHANNEL_NAME = "AgendaRecap Reminder";
+    public static final String DEFAULT_CHANNEL_ID = "agendarecap_reminder_channel_default";
+    public static final String DEFAULT_CHANNEL_NAME = "AgendaRecap Reminder";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -25,7 +25,7 @@ public class AlarmReceiver extends BroadcastReceiver {
         PowerManager.WakeLock wakeLock = null;
         if (pm != null) {
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AgendaRecap:AlarmWakeLock");
-            wakeLock.acquire(3000);
+            wakeLock.acquire(5000);
         }
 
         try {
@@ -33,6 +33,7 @@ public class AlarmReceiver extends BroadcastReceiver {
             String occurrenceId = intent.getStringExtra("occurrenceId");
             String title = intent.getStringExtra("title");
             String note = intent.getStringExtra("note");
+            String sound = intent.getStringExtra("sound");
             String scheduledTimeStr = intent.getStringExtra("scheduledTimeStr");
 
             if (title == null || title.trim().isEmpty()) {
@@ -41,8 +42,13 @@ public class AlarmReceiver extends BroadcastReceiver {
             if (note == null || note.trim().isEmpty()) {
                 note = "Waktu pengingat Anda telah tiba!";
             }
+            if (sound == null || sound.trim().isEmpty()) {
+                sound = "default";
+            }
 
-            createNotificationChannel(context);
+            // Generate Sound Uri and Channel Id
+            SoundChannelInfo channelInfo = getSoundChannelInfo(context, sound);
+            createNotificationChannel(context, channelInfo);
 
             int notificationId = (occurrenceId != null) ? Math.abs(occurrenceId.hashCode()) : (int) System.currentTimeMillis();
 
@@ -66,6 +72,7 @@ public class AlarmReceiver extends BroadcastReceiver {
             snooze5Intent.putExtra("occurrenceId", occurrenceId);
             snooze5Intent.putExtra("title", title);
             snooze5Intent.putExtra("note", note);
+            snooze5Intent.putExtra("sound", sound);
             snooze5Intent.putExtra("notificationId", notificationId);
             PendingIntent snooze5PendingIntent = PendingIntent.getBroadcast(
                     context,
@@ -81,6 +88,7 @@ public class AlarmReceiver extends BroadcastReceiver {
             snooze15Intent.putExtra("occurrenceId", occurrenceId);
             snooze15Intent.putExtra("title", title);
             snooze15Intent.putExtra("note", note);
+            snooze15Intent.putExtra("sound", sound);
             snooze15Intent.putExtra("notificationId", notificationId);
             PendingIntent snooze15PendingIntent = PendingIntent.getBroadcast(
                     context,
@@ -95,12 +103,7 @@ public class AlarmReceiver extends BroadcastReceiver {
                 contentText = note + " (" + scheduledTimeStr + ")";
             }
 
-            Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-            if (soundUri == null) {
-                soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-            }
-
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, channelInfo.channelId)
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setContentTitle(title)
                     .setContentText(contentText)
@@ -108,7 +111,7 @@ public class AlarmReceiver extends BroadcastReceiver {
                     .setPriority(NotificationCompat.PRIORITY_MAX)
                     .setCategory(NotificationCompat.CATEGORY_ALARM)
                     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                    .setSound(soundUri)
+                    .setSound(channelInfo.soundUri)
                     .setVibrate(new long[]{0, 500, 200, 500, 200, 500})
                     .setOngoing(true)
                     .setAutoCancel(false)
@@ -128,32 +131,71 @@ public class AlarmReceiver extends BroadcastReceiver {
         }
     }
 
-    private void createNotificationChannel(Context context) {
+    public static class SoundChannelInfo {
+        public String channelId;
+        public String channelName;
+        public Uri soundUri;
+
+        public SoundChannelInfo(String channelId, String channelName, Uri soundUri) {
+            this.channelId = channelId;
+            this.channelName = channelName;
+            this.soundUri = soundUri;
+        }
+    }
+
+    public static SoundChannelInfo getSoundChannelInfo(Context context, String soundOption) {
+        String cleanKey = "default";
+        Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+
+        if (soundOption != null && !soundOption.trim().isEmpty()) {
+            String lower = soundOption.toLowerCase().trim();
+            if (lower.startsWith("content://") || lower.startsWith("file://")) {
+                cleanKey = "custom_" + Math.abs(soundOption.hashCode());
+                soundUri = Uri.parse(soundOption);
+            } else if (lower.equals("chime") || lower.equals("notification")) {
+                cleanKey = "chime";
+                soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+            } else if (lower.equals("ringtone")) {
+                cleanKey = "ringtone";
+                soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE);
+            } else if (lower.equals("digital") || lower.equals("urgent")) {
+                cleanKey = lower;
+                soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+            }
+        }
+
+        if (soundUri == null) {
+            soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        }
+
+        String channelId = "agendarecap_reminder_channel_" + cleanKey;
+        String channelName = "AgendaRecap Reminder (" + cleanKey + ")";
+
+        return new SoundChannelInfo(channelId, channelName, soundUri);
+    }
+
+    private void createNotificationChannel(Context context, SoundChannelInfo info) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager manager = context.getSystemService(NotificationManager.class);
             if (manager != null) {
-                NotificationChannel existingChannel = manager.getNotificationChannel(CHANNEL_ID);
+                NotificationChannel existingChannel = manager.getNotificationChannel(info.channelId);
                 if (existingChannel == null) {
-                    Uri soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-                    if (soundUri == null) {
-                        soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-                    }
                     AudioAttributes audioAttributes = new AudioAttributes.Builder()
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .setUsage(AudioAttributes.USAGE_ALARM)
                             .build();
 
                     NotificationChannel channel = new NotificationChannel(
-                            CHANNEL_ID,
-                            CHANNEL_NAME,
+                            info.channelId,
+                            info.channelName,
                             NotificationManager.IMPORTANCE_HIGH
                     );
-                    channel.setDescription("Pengingat & Alarm AgendaRecap Pro");
+                    channel.setDescription("Pengingat & Alarm AgendaRecap Pro (" + info.channelId + ")");
                     channel.enableLights(true);
                     channel.setLightColor(Color.BLUE);
                     channel.enableVibration(true);
                     channel.setVibrationPattern(new long[]{0, 500, 200, 500, 200, 500});
-                    channel.setSound(soundUri, audioAttributes);
+                    channel.setSound(info.soundUri, audioAttributes);
 
                     manager.createNotificationChannel(channel);
                 }
@@ -161,3 +203,4 @@ public class AlarmReceiver extends BroadcastReceiver {
         }
     }
 }
+

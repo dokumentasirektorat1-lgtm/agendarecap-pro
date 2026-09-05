@@ -35,6 +35,7 @@ public class BootReceiver extends BroadcastReceiver {
                     String occurrenceId = json.optString("occurrenceId");
                     String title = json.optString("title");
                     String note = json.optString("note");
+                    String sound = json.optString("sound", "default");
                     long scheduledAtMs = json.optLong("scheduledAtMs");
 
                     if (scheduledAtMs > nowMs) {
@@ -43,6 +44,7 @@ public class BootReceiver extends BroadcastReceiver {
                         alarmIntent.putExtra("occurrenceId", occurrenceId);
                         alarmIntent.putExtra("title", title);
                         alarmIntent.putExtra("note", note);
+                        alarmIntent.putExtra("sound", sound);
 
                         int pendingIntentId = Math.abs(occurrenceId.hashCode());
 
@@ -69,3 +71,4 @@ public class BootReceiver extends BroadcastReceiver {
         }
     }
 }
+

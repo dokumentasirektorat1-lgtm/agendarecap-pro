@@ -4,6 +4,9 @@ import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.media.MediaPlayer;
+import android.media.RingtoneManager;
+import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
 import androidx.core.app.NotificationManagerCompat;
@@ -19,12 +22,15 @@ import org.json.JSONObject;
 @CapacitorPlugin(name = "NativeAlarm")
 public class NativeAlarmPlugin extends Plugin {
 
+    private static MediaPlayer mediaPlayer;
+
     @PluginMethod
     public void schedule(PluginCall call) {
         String reminderId = call.getString("reminderId");
         String occurrenceId = call.getString("occurrenceId");
         String title = call.getString("title");
         String note = call.getString("note", "");
+        String sound = call.getString("sound", "default");
         Long scheduledAtMs = call.getLong("scheduledAtMs");
 
         if (occurrenceId == null || scheduledAtMs == null) {
@@ -54,6 +60,7 @@ public class NativeAlarmPlugin extends Plugin {
             alarmIntent.putExtra("occurrenceId", occurrenceId);
             alarmIntent.putExtra("title", title);
             alarmIntent.putExtra("note", note);
+            alarmIntent.putExtra("sound", sound);
 
             int pendingIntentId = Math.abs(occurrenceId.hashCode());
 
@@ -76,6 +83,7 @@ public class NativeAlarmPlugin extends Plugin {
             json.put("occurrenceId", occurrenceId);
             json.put("title", title);
             json.put("note", note);
+            json.put("sound", sound);
             json.put("scheduledAtMs", scheduledAtMs);
             AlarmStorage.saveAlarm(context, occurrenceId, json.toString());
 
@@ -127,6 +135,7 @@ public class NativeAlarmPlugin extends Plugin {
         Integer minutes = call.getInt("minutes", 5);
         String title = call.getString("title", "Pengingat AgendaRecap Pro");
         String note = call.getString("note", "");
+        String sound = call.getString("sound", "default");
 
         long snoozeTargetMs = System.currentTimeMillis() + (minutes * 60 * 1000L);
 
@@ -140,6 +149,7 @@ public class NativeAlarmPlugin extends Plugin {
                 alarmIntent.putExtra("occurrenceId", occurrenceId);
                 alarmIntent.putExtra("title", title);
                 alarmIntent.putExtra("note", note);
+                alarmIntent.putExtra("sound", sound);
 
                 int pendingIntentId = Math.abs(occurrenceId.hashCode());
 
@@ -161,6 +171,7 @@ public class NativeAlarmPlugin extends Plugin {
                 json.put("occurrenceId", occurrenceId);
                 json.put("title", title);
                 json.put("note", note);
+                json.put("sound", sound);
                 json.put("scheduledAtMs", snoozeTargetMs);
                 AlarmStorage.saveAlarm(context, occurrenceId, json.toString());
 
@@ -266,4 +277,50 @@ public class NativeAlarmPlugin extends Plugin {
         ret.put("alreadyGranted", true);
         call.resolve(ret);
     }
+
+    @PluginMethod
+    public void playAudioPreview(PluginCall call) {
+        String sound = call.getString("sound", "default");
+        Context context = getContext();
+
+        try {
+            stopMedia();
+            AlarmReceiver.SoundChannelInfo info = AlarmReceiver.getSoundChannelInfo(context, sound);
+
+            mediaPlayer = new MediaPlayer();
+            mediaPlayer.setDataSource(context, info.soundUri);
+            mediaPlayer.setAudioStreamType(android.media.AudioManager.STREAM_ALARM);
+            mediaPlayer.prepare();
+            mediaPlayer.start();
+
+            JSObject ret = new JSObject();
+            ret.put("playing", true);
+            ret.put("sound", sound);
+            call.resolve(ret);
+        } catch (Exception e) {
+            stopMedia();
+            call.reject("Failed to play audio preview: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void stopAudioPreview(PluginCall call) {
+        stopMedia();
+        JSObject ret = new JSObject();
+        ret.put("playing", false);
+        call.resolve(ret);
+    }
+
+    private void stopMedia() {
+        if (mediaPlayer != null) {
+            try {
+                if (mediaPlayer.isPlaying()) {
+                    mediaPlayer.stop();
+                }
+                mediaPlayer.release();
+            } catch (Exception ignored) {}
+            mediaPlayer = null;
+        }
+    }
 }
+

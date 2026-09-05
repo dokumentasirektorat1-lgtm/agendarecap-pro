@@ -2,7 +2,6 @@
 // Bridges Next.js TypeScript client with Java NativeAlarmPlugin on Android, with Web Fallbacks
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
-import { addToOfflineQueue } from '@/lib/idb';
 
 export interface NativeAlarmPluginInterface {
   schedule(options: {
@@ -10,6 +9,7 @@ export interface NativeAlarmPluginInterface {
     occurrenceId: string;
     title: string;
     note?: string;
+    sound?: string;
     scheduledAtMs: number;
   }): Promise<{ success: boolean; occurrenceId?: string; scheduledAtMs?: number }>;
 
@@ -21,6 +21,7 @@ export interface NativeAlarmPluginInterface {
     minutes: number;
     title?: string;
     note?: string;
+    sound?: string;
   }): Promise<{ success: boolean; snoozedMinutes?: number; snoozedUntilMs?: number }>;
 
   cancelAll(): Promise<{ success: boolean }>;
@@ -30,6 +31,10 @@ export interface NativeAlarmPluginInterface {
   checkPermissions(): Promise<{ notifications: string; exactAlarm: boolean }>;
 
   requestExactAlarmPermission(): Promise<{ opened: boolean; alreadyGranted?: boolean }>;
+
+  playAudioPreview(options: { sound: string }): Promise<{ playing: boolean; sound: string }>;
+
+  stopAudioPreview(): Promise<{ playing: boolean }>;
 }
 
 const NativeAlarm = registerPlugin<NativeAlarmPluginInterface>('NativeAlarm');
@@ -39,6 +44,7 @@ export interface ScheduleNativeAlarmInput {
   occurrenceId: string;
   title: string;
   body?: string;
+  sound?: string;
   scheduledAt: string; // ISO string UTC
 }
 
@@ -97,9 +103,10 @@ export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput):
         occurrenceId: input.occurrenceId,
         title: input.title,
         note: input.body || '',
+        sound: input.sound || 'default',
         scheduledAtMs
       });
-      console.log(`[NATIVE ALARM] Scheduled native OS exact alarm occurrenceId=${input.occurrenceId} target=${input.scheduledAt}`);
+      console.log(`[NATIVE ALARM] Scheduled native OS exact alarm occurrenceId=${input.occurrenceId} target=${input.scheduledAt} sound=${input.sound || 'default'}`);
       return res.success;
     } catch (err: any) {
       console.error('[NATIVE ALARM] Native schedule error:', err);
@@ -107,7 +114,6 @@ export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput):
     }
   }
 
-  // Web Browser Fallback (Using Service Worker or Notification timer)
   return true;
 }
 
@@ -129,7 +135,8 @@ export async function snoozeNativeLocalAlarm(
   occurrenceId: string,
   minutes: number,
   title?: string,
-  note?: string
+  note?: string,
+  sound?: string
 ): Promise<boolean> {
   if (!isNativePlatform()) return true;
 
@@ -139,7 +146,8 @@ export async function snoozeNativeLocalAlarm(
       occurrenceId,
       minutes,
       title: title || 'Pengingat AgendaRecap Pro',
-      note: note || ''
+      note: note || '',
+      sound: sound || 'default'
     });
     console.log(`[NATIVE ALARM] Snoozed native OS alarm occurrenceId=${occurrenceId} +${minutes} minutes`);
     return res.success;
@@ -173,3 +181,30 @@ export async function getScheduledNativeAlarms(): Promise<any[]> {
     return [];
   }
 }
+
+export async function playNativeAudioPreview(sound: string): Promise<boolean> {
+  if (isNativePlatform()) {
+    try {
+      const res = await NativeAlarm.playAudioPreview({ sound });
+      return res.playing;
+    } catch (err) {
+      console.warn('[NATIVE ALARM] playAudioPreview notice:', err);
+      return false;
+    }
+  }
+  return false;
+}
+
+export async function stopNativeAudioPreview(): Promise<boolean> {
+  if (isNativePlatform()) {
+    try {
+      await NativeAlarm.stopAudioPreview();
+      return true;
+    } catch (err) {
+      console.warn('[NATIVE ALARM] stopAudioPreview notice:', err);
+      return false;
+    }
+  }
+  return false;
+}
+

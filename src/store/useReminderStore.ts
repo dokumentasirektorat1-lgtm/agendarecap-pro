@@ -284,6 +284,7 @@ export const useReminderStore = create<ReminderStoreState>()(
             occurrenceId,
             title: input.title.trim(),
             body: input.body || '',
+            sound: input.sound || 'default',
             scheduledAt: scheduledAtISO
           });
         }
@@ -451,6 +452,7 @@ export const useReminderStore = create<ReminderStoreState>()(
             occurrenceId,
             title: target.title,
             body: target.body,
+            sound: target.sound || 'default',
             scheduledAt: nextScheduledISO
           });
         }
@@ -530,6 +532,7 @@ export const useReminderStore = create<ReminderStoreState>()(
             occurrenceId: occurrenceId || 'unknown',
             title: targetRem?.title || 'Pengingat AgendaRecap',
             body: targetRem?.body || '',
+            sound: targetRem?.sound || 'default',
             scheduledAt: snoozeISO
           });
         }

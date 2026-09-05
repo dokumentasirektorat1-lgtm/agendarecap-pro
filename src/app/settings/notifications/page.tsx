@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { ArrowLeft, ShieldAlert, CheckCircle2, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, Bell, Calendar, Clock, AlertCircle, Play, XCircle, Wrench, Download } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ArrowLeft, ShieldAlert, CheckCircle2, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, Bell, Calendar, Clock, AlertCircle, Play, XCircle, Wrench, Download, Volume2, VolumeX, Music, FileAudio, Check, Save } from "lucide-react";
 import Link from "next/link";
 import Swal from "sweetalert2";
 import { getRemindersFromIDB, getOccurrencesFromIDB, getOfflineQueue } from "@/lib/idb";
@@ -13,7 +13,9 @@ import {
   scheduleNativeLocalAlarm,
   cancelNativeLocalAlarm,
   cancelAllNativeLocalAlarms,
-  getScheduledNativeAlarms
+  getScheduledNativeAlarms,
+  playNativeAudioPreview,
+  stopNativeAudioPreview
 } from "@/lib/native-alarm";
 
 export default function NotificationSettingsPage() {
@@ -48,6 +50,22 @@ export default function NotificationSettingsPage() {
   const [isTestingPush, setIsTestingPush] = useState<boolean>(false);
   const [isTestingLocal, setIsTestingLocal] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  // Sound Engine State
+  const [selectedSound, setSelectedSound] = useState<string>("default");
+  const [customSoundUri, setCustomSoundUri] = useState<string>("");
+  const [customSoundName, setCustomSoundName] = useState<string>("");
+  const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
+  const webAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const savedSound = localStorage.getItem('agendarecap_default_sound') || 'default';
+    setSelectedSound(savedSound);
+    const savedCustomUri = localStorage.getItem('agendarecap_custom_sound_uri') || '';
+    const savedCustomName = localStorage.getItem('agendarecap_custom_sound_name') || '';
+    setCustomSoundUri(savedCustomUri);
+    setCustomSoundName(savedCustomName);
+  }, []);
 
   const runDiagnosticCheck = async () => {
     setIsRefreshing(true);
@@ -158,20 +176,111 @@ export default function NotificationSettingsPage() {
     setIsRefreshing(false);
   };
 
-  useEffect(() => {
-    runDiagnosticCheck();
+  const handlePlayPreview = async (soundToPlay?: string) => {
+    const targetSound = soundToPlay || (selectedSound === 'custom' ? customSoundUri : selectedSound);
+    if (!targetSound) return;
 
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+    handleStopPreview();
 
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    if (isNativePlatform()) {
+      const ok = await playNativeAudioPreview(targetSound);
+      setIsPlayingAudio(ok);
+    } else {
+      // Web Audio Fallback
+      try {
+        let audioSrc = '/sounds/chime.mp3'; // Fallback asset if present
+        if (targetSound.startsWith('data:') || targetSound.startsWith('blob:') || targetSound.startsWith('http')) {
+          audioSrc = targetSound;
+        }
 
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+        const audio = new Audio(audioSrc);
+        webAudioRef.current = audio;
+        audio.play().then(() => setIsPlayingAudio(true)).catch((e) => {
+          console.warn('Web audio preview error:', e);
+          setIsPlayingAudio(false);
+        });
+        audio.onended = () => setIsPlayingAudio(false);
+      } catch (err) {
+        console.warn('Audio preview exception:', err);
+      }
+    }
+  };
+
+  const handleStopPreview = async () => {
+    if (isNativePlatform()) {
+      await stopNativeAudioPreview();
+    }
+    if (webAudioRef.current) {
+      try {
+        webAudioRef.current.pause();
+        webAudioRef.current.currentTime = 0;
+      } catch (ignored) {}
+      webAudioRef.current = null;
+    }
+    setIsPlayingAudio(false);
+  };
+
+  const handleCustomFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Audio File Validation (Strict Extension & MIME Check)
+    const validExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.aac'];
+    const fileNameLower = file.name.toLowerCase();
+    const isValidExt = validExtensions.some(ext => fileNameLower.endsWith(ext));
+    const isValidType = file.type.startsWith('audio/') || file.type === '';
+
+    if (!isValidExt || !isValidType) {
+      Swal.fire({
+        icon: 'error',
+        title: 'Format Audio Tidak Valid',
+        text: 'Format audio tidak didukung. Silakan pilih file MP3, WAV, OGG, M4A, atau AAC.'
+      });
+      e.target.value = '';
+      return;
+    }
+
+    // Size limit 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Ukuran File Terlalu Besar',
+        text: 'Ukuran audio maksimal yang didukung adalah 5 MB.'
+      });
+      e.target.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUri = event.target?.result as string;
+      setCustomSoundUri(dataUri);
+      setCustomSoundName(file.name);
+      setSelectedSound('custom');
+      localStorage.setItem('agendarecap_custom_sound_uri', dataUri);
+      localStorage.setItem('agendarecap_custom_sound_name', file.name);
+
+      Swal.fire({
+        icon: 'success',
+        title: 'File Audio Berhasil Dipilih',
+        text: `File "${file.name}" siap digunakan sebagai suara pengingat.`
+      });
     };
-  }, []);
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveSoundPreference = () => {
+    localStorage.setItem('agendarecap_default_sound', selectedSound);
+    if (selectedSound === 'custom' && customSoundUri) {
+      localStorage.setItem('agendarecap_custom_sound_uri', customSoundUri);
+      localStorage.setItem('agendarecap_custom_sound_name', customSoundName);
+    }
+    Swal.fire({
+      icon: 'success',
+      title: 'Suara Notifikasi Disimpan',
+      text: `Pengaturan suara default pengingat diubah ke: ${selectedSound.toUpperCase()}`
+    });
+  };
 
   const handleOpenExactAlarmSettings = async () => {
     const ok = await requestExactAlarmPermission();
@@ -567,6 +676,115 @@ export default function NotificationSettingsPage() {
             </div>
           </div>
 
+        </div>
+
+        {/* Custom Notification Sound Selection Panel */}
+        <div className="glass p-6 rounded-[2rem] border border-blue-500/30 bg-blue-500/5 flex flex-col gap-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+            <div>
+              <h2 className="text-sm font-bold text-blue-300 uppercase tracking-wider flex items-center gap-2">
+                <Music className="w-5 h-5 text-blue-400" /> Suara Notifikasi & Alarm (Android Native & Web)
+              </h2>
+              <p className="text-xs text-zinc-400 mt-1">
+                Pilih suara notifikasi yang akan dibunyikan saat pengingat aktif. Channel Android akan dibuat secara dinamis.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {isPlayingAudio ? (
+                <button
+                  type="button"
+                  onClick={handleStopPreview}
+                  className="px-4 py-2.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg"
+                >
+                  <VolumeX className="w-4 h-4 text-red-400 animate-pulse" /> STOP PREVIEW
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handlePlayPreview()}
+                  className="px-4 py-2.5 bg-blue-500 hover:bg-blue-600 active:scale-95 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-lg"
+                >
+                  <Volume2 className="w-4 h-4" /> PREVIEW SUARA
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+            {[
+              { id: 'default', label: 'Default Alarm System', desc: 'Suara alarm standar sistem OS Android' },
+              { id: 'chime', label: 'Gentle Chime', desc: 'Notifikasi lembut bernada sedang' },
+              { id: 'ringtone', label: 'Device Ringtone', desc: 'Nada panggil standar perangkat' },
+              { id: 'digital', label: 'Digital Alarm', desc: 'Suara beeper digital frekuensi tinggi' },
+              { id: 'urgent', label: 'Urgent Bell', desc: 'Lonceng peringatan cepat' },
+              { id: 'custom', label: 'Custom File Audio', desc: 'Upload file MP3 / WAV pilihan Anda' },
+            ].map(opt => {
+              const isSelected = selectedSound === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedSound(opt.id);
+                    if (opt.id !== 'custom') handlePlayPreview(opt.id);
+                  }}
+                  className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between gap-2 ${
+                    isSelected
+                      ? 'bg-blue-500/20 border-blue-400/60 text-white shadow-lg shadow-blue-500/10'
+                      : 'bg-black/40 border-white/10 text-zinc-400 hover:bg-white/5 hover:border-white/20'
+                  }`}
+                >
+                  <div className="flex items-center justify-between w-full">
+                    <span className="text-xs font-black text-zinc-200 flex items-center gap-2">
+                      <Music className={`w-3.5 h-3.5 ${isSelected ? 'text-blue-400' : 'text-zinc-500'}`} />
+                      {opt.label}
+                    </span>
+                    {isSelected && <Check className="w-4 h-4 text-blue-400" />}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-tight">{opt.desc}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Custom File Upload Section */}
+          {selectedSound === 'custom' && (
+            <div className="p-4 rounded-2xl bg-black/60 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <FileAudio className="w-6 h-6 text-blue-400 shrink-0" />
+                <div>
+                  <h4 className="text-xs font-bold text-blue-300">File Audio Custom Pilihan:</h4>
+                  <p className="text-xs text-zinc-300 font-mono mt-0.5 truncate max-w-xs sm:max-w-md">
+                    {customSoundName || 'Belum ada file audio terpilih.'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <label className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-2 shrink-0 border border-white/10">
+                  <FileAudio className="w-4 h-4 text-blue-400" />
+                  <span>PILIH FILE AUDIO</span>
+                  <input
+                    type="file"
+                    accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac"
+                    onChange={handleCustomFileSelect}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={handleSaveSoundPreference}
+              className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-xl shadow-blue-500/20 transition-all flex items-center gap-2 active:scale-95"
+            >
+              <Save className="w-4 h-4" /> SIMPAN SUARA DEFAULT PENGINGAT
+            </button>
+          </div>
         </div>
 
         {/* Test Alarm Controls (Requirement 25) */}
