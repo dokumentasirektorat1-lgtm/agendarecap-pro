@@ -24,18 +24,21 @@ export async function POST(request: Request) {
     );
 
     const testReminderId = `test-${Date.now()}`;
+    const testOccurrenceId = `occ-test-${Date.now()}`;
+    const notificationTag = `reminder-${testReminderId}-occurrence-${testOccurrenceId}`;
+
+    // STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE (5 MIN / 15 MIN / 1 HOUR)
     const payload = JSON.stringify({
-      id: testReminderId,
-      title: '🔔 Uji Web Push Production-Ready',
-      body: 'Pengingat Web Push dari server berhasil diterima walau tab ditutup!',
-      tag: `reminder-${testReminderId}`,
-      url: '/reminders',
+      reminderId: testReminderId,
+      occurrenceId: testOccurrenceId,
+      notificationTag,
+      title: '🔔 Uji Push Notification AgendaRecap',
+      body: 'Notifikasi server Web Push berhasil diterima walau tab browser ditutup! (Aksi: CLOSE & SNOOZE)',
       actions: [
-        { action: 'open', title: '📂 OPEN' },
+        { action: 'close', title: '❌ CLOSE' },
         { action: 'snooze_5', title: '⏱ 5 MIN' },
         { action: 'snooze_15', title: '⏱ 15 MIN' },
-        { action: 'snooze_60', title: '⏱ 1 HOUR' },
-        { action: 'close', title: '❌ CLOSE' }
+        { action: 'snooze_60', title: '⏱ 1 HOUR' }
       ]
     });
 
@@ -53,7 +56,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      message: delayMs > 0 ? `Push scheduled in ${delayMs / 1000}s` : 'Push sent immediately'
+      message: delayMs > 0 ? `Test Push scheduled in ${delayMs / 1000}s` : 'Test Push sent immediately'
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

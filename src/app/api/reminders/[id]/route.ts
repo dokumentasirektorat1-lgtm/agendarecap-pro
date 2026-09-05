@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
+import { generateNextOccurrence } from '@/lib/reminder-service';
 
 function getAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
@@ -16,135 +16,111 @@ export async function GET(
   try {
     const { id } = await params;
     const adminSupabase = getAdminClient();
-    const { data: reminder, error } = await adminSupabase
+    const { data: reminder } = await adminSupabase
       .from('reminders')
       .select('*')
       .eq('id', id)
       .single();
 
-    if (error || !reminder) {
+    const { data: occurrences } = await adminSupabase
+      .from('reminder_occurrences')
+      .select('*')
+      .eq('reminder_id', id);
+
+    if (!reminder) {
       return NextResponse.json({ error: 'Reminder not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ reminder });
+    return NextResponse.json({ reminder, occurrences: occurrences || [] });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// PATCH /api/reminders/:id - Update reminder
+// PATCH /api/reminders/:id - Update reminder or occurrence state
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: reminderId } = await params;
     const body = await request.json();
+    const occurrenceId = body.occurrenceId;
     const adminSupabase = getAdminClient();
 
-    const payload: any = { updated_at: new Date().toISOString() };
-    if (body.title !== undefined) payload.title = body.title;
-    if (body.body !== undefined) payload.body = body.body;
-    if (body.time !== undefined) payload.time = body.time;
-    if (body.scheduledAt !== undefined) payload.scheduled_at = body.scheduledAt;
-    if (body.scheduled_at !== undefined) payload.scheduled_at = body.scheduled_at;
-    if (body.timezone !== undefined) payload.timezone = body.timezone;
-    if (body.status !== undefined) payload.status = body.status;
-    if (body.frequency !== undefined) payload.frequency = body.frequency;
-    if (body.daysOfWeek !== undefined) payload.days_of_week = body.daysOfWeek;
-    if (body.sound !== undefined) payload.sound = body.sound;
-    if (body.isActive !== undefined) payload.is_active = body.isActive;
-    if (body.is_active !== undefined) payload.is_active = body.is_active;
+    const nowISO = new Date().toISOString();
+    const targetStatus = body.status;
 
-    if (body.status === 'completed' || body.status === 'dismissed') {
-      payload.completed_at = new Date().toISOString();
-      payload.is_active = false;
-    }
-
-    let updatedData = null;
-    try {
-      const { data } = await adminSupabase
-        .from('reminders')
-        .update(payload)
-        .eq('id', id)
+    // 1. Update target occurrence status if specified
+    let targetOccScheduledAt = nowISO;
+    if (occurrenceId && occurrenceId !== 'unknown') {
+      const { data: occData } = await adminSupabase
+        .from('reminder_occurrences')
+        .update({
+          status: targetStatus || 'completed',
+          completed_at: targetStatus === 'completed' ? nowISO : undefined,
+          dismissed_at: targetStatus === 'dismissed' ? nowISO : undefined,
+          updated_at: nowISO
+        })
+        .eq('id', occurrenceId)
         .select()
         .single();
-      if (data) updatedData = data;
-    } catch (e) {
-      console.warn('[PATCH API] Primary table update notice:', e);
-    }
 
-    // Also sync update to push_subscribers.reminders JSON array
-    try {
-      const { data: subs } = await adminSupabase.from('push_subscribers').select('*');
-      if (subs && subs.length > 0) {
-        for (const sub of subs) {
-          if (Array.isArray(sub.reminders)) {
-            const updatedList = sub.reminders.map((r: any) => {
-              if (r.id === id) {
-                return {
-                  ...r,
-                  status: body.status || r.status,
-                  isActive: payload.is_active !== undefined ? payload.is_active : r.isActive,
-                  updatedAt: new Date().toISOString()
-                };
-              }
-              return r;
-            });
-            await adminSupabase
-              .from('push_subscribers')
-              .update({ reminders: updatedList })
-              .eq('endpoint', sub.endpoint);
-          }
-        }
+      if (occData) {
+        targetOccScheduledAt = occData.scheduled_at;
       }
-    } catch (e) {
-      console.warn('[PATCH API] Subscriber JSON sync notice:', e);
+    } else {
+      // Update all non-completed occurrences of this reminderId
+      await adminSupabase
+        .from('reminder_occurrences')
+        .update({
+          status: targetStatus || 'completed',
+          completed_at: targetStatus === 'completed' ? nowISO : undefined,
+          dismissed_at: targetStatus === 'dismissed' ? nowISO : undefined,
+          updated_at: nowISO
+        })
+        .eq('reminder_id', reminderId)
+        .in('status', ['scheduled', 'processing', 'sent', 'snoozed']);
     }
 
-    return NextResponse.json({ success: true, id, reminder: updatedData || { id, ...payload } });
+    // 2. If occurrence CLOSE / completed, trigger next occurrence if recurring
+    if (targetStatus === 'completed' || targetStatus === 'dismissed') {
+      await generateNextOccurrence(reminderId, targetOccScheduledAt);
+    }
+
+    // 3. Update parent reminder definition
+    const rPayload: any = { updated_at: nowISO };
+    if (body.title !== undefined) rPayload.title = body.title;
+    if (body.body !== undefined) rPayload.body = body.body;
+    if (body.time !== undefined) rPayload.time = body.time;
+    if (body.frequency !== undefined) rPayload.frequency = body.frequency;
+    if (body.isActive !== undefined) rPayload.is_active = body.isActive;
+
+    await adminSupabase
+      .from('reminders')
+      .update(rPayload)
+      .eq('id', reminderId);
+
+    return NextResponse.json({ success: true, reminderId, status: targetStatus });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-// DELETE /api/reminders/:id - Delete reminder
+// DELETE /api/reminders/:id - Delete reminder & all occurrences
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: reminderId } = await params;
     const adminSupabase = getAdminClient();
 
-    try {
-      await adminSupabase
-        .from('reminders')
-        .delete()
-        .eq('id', id);
-    } catch (e) {
-      console.warn('[DELETE API] Primary table notice:', e);
-    }
+    // Delete parent reminder (Cascades to occurrences via DB FK ON DELETE CASCADE)
+    await adminSupabase.from('reminders').delete().eq('id', reminderId);
+    await adminSupabase.from('reminder_occurrences').delete().eq('reminder_id', reminderId);
 
-    // Sync delete to push_subscribers JSON array
-    try {
-      const { data: subs } = await adminSupabase.from('push_subscribers').select('*');
-      if (subs && subs.length > 0) {
-        for (const sub of subs) {
-          if (Array.isArray(sub.reminders)) {
-            const updatedList = sub.reminders.filter((r: any) => r.id !== id);
-            await adminSupabase
-              .from('push_subscribers')
-              .update({ reminders: updatedList })
-              .eq('endpoint', sub.endpoint);
-          }
-        }
-      }
-    } catch (e) {
-      console.warn('[DELETE API] Subscriber JSON sync notice:', e);
-    }
-
-    return NextResponse.json({ success: true, id });
+    return NextResponse.json({ success: true, reminderId });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

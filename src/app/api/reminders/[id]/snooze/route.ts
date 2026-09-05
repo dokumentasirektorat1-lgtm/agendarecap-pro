@@ -13,9 +13,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: reminderId } = await params;
     const body = await request.json().catch(() => ({}));
     const minutes = Number(body.minutes) || 5; // Default snooze 5 minutes
+    const occurrenceId = body.occurrenceId;
 
     const now = new Date();
     const newTriggerTime = new Date(now.getTime() + minutes * 60 * 1000);
@@ -27,67 +28,63 @@ export async function POST(
 
     const adminSupabase = getAdminClient();
 
-    // 1. Update primary table if present
-    const payload = {
-      scheduled_at: newScheduledAtISO,
-      snoozed_until: newScheduledAtISO,
-      status: 'snoozed',
-      time: newTime,
-      is_active: true,
-      updated_at: now.toISOString()
-    };
-
-    let updatedReminderData = null;
-    try {
-      const { data } = await adminSupabase
-        .from('reminders')
-        .update(payload)
-        .eq('id', id)
-        .select()
-        .single();
-      if (data) updatedReminderData = data;
-    } catch (e) {
-      console.warn('[SNOOZE API] Primary table notice:', e);
+    // 1. Update target occurrence status to 'snoozed' / 'scheduled' with snoozed_until timestamp
+    let occUpdated = false;
+    if (occurrenceId && occurrenceId !== 'unknown') {
+      try {
+        const { data } = await adminSupabase
+          .from('reminder_occurrences')
+          .update({
+            status: 'snoozed',
+            snoozed_until: newScheduledAtISO,
+            updated_at: now.toISOString()
+          })
+          .eq('id', occurrenceId)
+          .select()
+          .single();
+        if (data) occUpdated = true;
+      } catch (e) {
+        console.warn('[SNOOZE API] Occurrence update notice:', e);
+      }
     }
 
-    // 2. Sync to push_subscribers.reminders JSON array
-    try {
-      const { data: subs } = await adminSupabase.from('push_subscribers').select('*');
-      if (subs && subs.length > 0) {
-        for (const sub of subs) {
-          if (Array.isArray(sub.reminders)) {
-            const updatedList = sub.reminders.map((r: any) => {
-              if (r.id === id) {
-                return {
-                  ...r,
-                  scheduledAt: newScheduledAtISO,
-                  status: 'snoozed',
-                  time: newTime,
-                  isActive: true,
-                  updatedAt: now.toISOString()
-                };
-              }
-              return r;
-            });
-            await adminSupabase
-              .from('push_subscribers')
-              .update({ reminders: updatedList })
-              .eq('endpoint', sub.endpoint);
-          }
-        }
+    // Fallback: update latest occurrence of this reminderId if occurrenceId not specified
+    if (!occUpdated) {
+      try {
+        await adminSupabase
+          .from('reminder_occurrences')
+          .update({
+            status: 'snoozed',
+            snoozed_until: newScheduledAtISO,
+            updated_at: now.toISOString()
+          })
+          .eq('reminder_id', reminderId);
+      } catch (e) {
+        console.warn('[SNOOZE API] Occurrence fallback notice:', e);
       }
+    }
+
+    // Also update parent reminder time display for legacy views
+    try {
+      await adminSupabase
+        .from('reminders')
+        .update({
+          time: newTime,
+          is_active: true,
+          updated_at: now.toISOString()
+        })
+        .eq('id', reminderId);
     } catch (e) {
-      console.warn('[SNOOZE API] Subscriber JSON sync notice:', e);
+      console.warn('[SNOOZE API] Reminder parent update notice:', e);
     }
 
     return NextResponse.json({
       success: true,
-      reminderId: id,
-      reminder: updatedReminderData,
+      reminderId,
+      occurrenceId,
       snoozedMinutes: minutes,
-      nextTriggerAt: newScheduledAtISO,
-      newTime,
-      status: 'snoozed'
+      snoozedUntil: newScheduledAtISO,
+      newTime
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

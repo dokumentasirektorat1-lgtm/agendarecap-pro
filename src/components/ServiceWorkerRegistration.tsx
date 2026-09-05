@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect } from "react";
+import { initSyncEngineListeners } from "@/lib/sync-engine";
 
 export default function ServiceWorkerRegistration() {
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
+    // Initialize Global Sync Engine Listeners (online event, visibility change)
+    initSyncEngineListeners();
+
     const registerSW = async () => {
       try {
         const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
-        console.log('[ServiceWorker] Registered with scope:', registration.scope);
+        console.log('[ServiceWorker v4] Registered with scope:', registration.scope);
 
-        // Force check update to replace any stale service worker with v3
+        // Check for updates on every page load
         registration.update().catch(() => {});
 
         registration.addEventListener('updatefound', () => {
@@ -19,22 +23,13 @@ export default function ServiceWorkerRegistration() {
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[ServiceWorker] New v3 version installed and ready.');
+                console.log('[ServiceWorker v4] New Service Worker version installed and ready.');
               }
             };
           }
         });
-
-        // Register Background Sync if supported
-        if ('sync' in registration) {
-          try {
-            await (registration as any).sync.register('sync-reminders');
-          } catch (syncErr) {
-            console.warn('[ServiceWorker] Background Sync registration warning:', syncErr);
-          }
-        }
       } catch (err) {
-        console.error('[ServiceWorker] Registration failed:', err);
+        console.error('[ServiceWorker v4] Registration failed:', err);
       }
     };
 

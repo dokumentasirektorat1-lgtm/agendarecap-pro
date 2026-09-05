@@ -1,6 +1,6 @@
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 import webpush from 'web-push';
-import { formatLocalFromUTC } from '@/lib/timezone';
+import { formatLocalFromUTC, getUTCISOFromLocal } from '@/lib/timezone';
 
 export interface ProcessRemindersResult {
   success: boolean;
@@ -13,27 +13,31 @@ export interface ProcessRemindersResult {
   error?: string;
 }
 
+function getAdminClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+  return createAdminSupabase(supabaseUrl, serviceKey);
+}
+
 export async function processDueReminders(): Promise<ProcessRemindersResult> {
   const logs: string[] = [];
   const addLog = (msg: string) => {
     const timeStr = new Date().toISOString();
-    const logLine = `[REMINDER ${timeStr}] ${msg}`;
+    const logLine = `[CRON ${timeStr}] ${msg}`;
     console.log(logLine);
     logs.push(logLine);
   };
 
-  addLog('Scheduler started - Checking pending reminders');
+  addLog('Scheduler trigger initiated - Checking due reminder occurrences');
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-  const supabase = createAdminSupabase(supabaseUrl, serviceKey);
+  const adminSupabase = getAdminClient();
 
   const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
   const vapidSubject = process.env.VAPID_SUBJECT || 'mailto:admin@agendarecap.com';
 
   if (!vapidPublic || !vapidPrivate) {
-    addLog('CRITICAL: VAPID keys not configured in environment variables');
+    addLog('CRITICAL ERROR: VAPID public or private key is missing in server environment variables!');
     return {
       success: false,
       checkedAt: new Date().toISOString(),
@@ -42,33 +46,32 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
       successPushCount: 0,
       failedPushCount: 0,
       logs,
-      error: 'VAPID keys not configured'
+      error: 'VAPID keys missing'
     };
   }
 
   try {
     webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
   } catch (err: any) {
-    addLog(`VAPID setup error: ${err.message}`);
+    addLog(`VAPID setup warning: ${err.message}`);
   }
 
   const now = new Date();
   const nowISO = now.toISOString();
   const nowLocalWIB = formatLocalFromUTC(nowISO, 'Asia/Jakarta');
-  addLog(`Server Current Time: UTC=${nowISO} | Asia/Jakarta=${nowLocalWIB}`);
+  addLog(`Current Server Execution Time: UTC=${nowISO} | Asia/Jakarta=${nowLocalWIB}`);
 
   let successPushCount = 0;
   let failedPushCount = 0;
-  let totalProcessed = 0;
-  let foundCount = 0;
+  let processedCount = 0;
 
-  // 1. Fetch Push Subscribers from database
-  const { data: subscribers, error: subErr } = await supabase
+  // 1. Fetch All Active Push Subscriptions Across User Devices
+  const { data: subscribers, error: subErr } = await adminSupabase
     .from('push_subscribers')
     .select('*');
 
   if (subErr || !subscribers || subscribers.length === 0) {
-    addLog(`WARNING: No active push subscribers found in database! (subscribers count = 0)`);
+    addLog(`WARNING: No active push subscribers found in database! (Device subscriptions = 0)`);
     return {
       success: true,
       checkedAt: nowISO,
@@ -81,188 +84,247 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     };
   }
 
-  addLog(`Active Push Subscribers in DB: ${subscribers.length}`);
+  addLog(`Active device push subscriptions in database: ${subscribers.length}`);
 
-  // =========================================================================
-  // STRATEGY 1: Primary `reminders` table query
-  // =========================================================================
-  let dueRemindersFromTable: any[] | null = null;
+  // 2. Atomic Claim Lock Query for Due Occurrences
+  let dueOccurrences: any[] = [];
+
+  // Try stored procedure `claim_due_occurrences` first
   try {
-    const { data, error: reminderErr } = await supabase
-      .from('reminders')
-      .select('*')
-      .in('status', ['scheduled', 'snoozed'])
-      .lte('scheduled_at', nowISO)
-      .eq('is_active', true);
+    const { data: claimedData, error: rpcErr } = await adminSupabase.rpc('claim_due_occurrences', {
+      target_now: nowISO,
+      fetch_limit: 50
+    });
 
-    if (!reminderErr && data && data.length > 0) {
-      dueRemindersFromTable = data;
+    if (!rpcErr && claimedData) {
+      dueOccurrences = claimedData;
     }
   } catch (e: any) {
-    addLog(`Notice: 'reminders' table query notice: ${e.message}`);
+    addLog(`RPC claim_due_occurrences fallback notice: ${e.message}`);
   }
 
-  if (dueRemindersFromTable && dueRemindersFromTable.length > 0) {
-    foundCount += dueRemindersFromTable.length;
-    addLog(`Primary Table Strategy: Found ${dueRemindersFromTable.length} due reminders in 'reminders' table`);
+  // Direct table query fallback if RPC is not deployed yet
+  if (dueOccurrences.length === 0) {
+    try {
+      const { data: rawOccurrences } = await adminSupabase
+        .from('reminder_occurrences')
+        .select('*')
+        .in('status', ['scheduled', 'snoozed'])
+        .or(`and(status.eq.scheduled,scheduled_at.lte.${nowISO}),and(status.eq.snoozed,snoozed_until.lte.${nowISO})`);
 
-    // Claim occurrence: Atomic state lock (scheduled/snoozed -> processing)
-    const dueIds = dueRemindersFromTable.map(r => r.id);
-    await supabase
-      .from('reminders')
-      .update({ status: 'processing', updated_at: nowISO })
-      .in('id', dueIds);
+      if (rawOccurrences && rawOccurrences.length > 0) {
+        const occIds = rawOccurrences.map(o => o.id);
+        // Lock occurrences atomically by setting status = 'processing'
+        await adminSupabase
+          .from('reminder_occurrences')
+          .update({ status: 'processing', updated_at: nowISO })
+          .in('id', occIds);
 
-    for (const r of dueRemindersFromTable) {
-      totalProcessed++;
-      const occurrenceId = crypto.randomUUID();
-      const scheduledLocalWIB = formatLocalFromUTC(r.scheduled_at, r.timezone || 'Asia/Jakarta');
-      addLog(`Processing table reminder id=${r.id} occurrenceId=${occurrenceId} title="${r.title}" scheduledAt=${r.scheduled_at} (${scheduledLocalWIB})`);
-
-      const targetSubs = subscribers.filter(s => !r.user_id || s.user_id === r.user_id || subscribers.length === 1);
-      const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
-
-      // NO OPEN ACTION! ONLY CLOSE & SNOOZE
-      const payload = JSON.stringify({
-        type: 'reminder',
-        reminderId: r.id,
-        occurrenceId,
-        notificationTag: `reminder-${r.id}-${occurrenceId}`,
-        title: r.title,
-        body: r.body || `Waktu pengingat Anda (${r.time || 'sekarang'}) telah tiba!`,
-        scheduledAt: r.scheduled_at,
-        isRecurring: r.frequency && r.frequency !== 'once',
-        source: r.title?.includes('Uji') ? 'scheduled-test' : 'scheduled',
-        actions: [
-          { action: 'close', title: '❌ CLOSE' },
-          { action: 'snooze_5', title: '⏱ 5 MIN' },
-          { action: 'snooze_15', title: '⏱ 15 MIN' },
-          { action: 'snooze_60', title: '⏱ 1 HOUR' }
-        ]
-      });
-
-      let pushSuccess = false;
-      for (const sub of subsToSend) {
-        addLog(`Pushing to subscriber endpoint=${sub.endpoint.substring(0, 35)}...`);
-        try {
-          const res = await webpush.sendNotification(sub.subscription, payload);
-          addLog(`Push success status=${res.statusCode} endpoint=${sub.endpoint.substring(0, 30)}...`);
-          successPushCount++;
-          pushSuccess = true;
-        } catch (err: any) {
-          failedPushCount++;
-          addLog(`Push failed error=${err.message} statusCode=${err.statusCode}`);
-          if (err.statusCode === 404 || err.statusCode === 410) {
-            await supabase.from('push_subscribers').delete().eq('endpoint', sub.endpoint);
-          }
-        }
+        dueOccurrences = rawOccurrences;
       }
+    } catch (e: any) {
+      addLog(`Direct occurrences table query notice: ${e.message}`);
+    }
+  }
 
-      // Mark status as 'sent' so it will NEVER be picked up again
-      const finalStatus = pushSuccess ? 'sent' : 'failed';
-      await supabase
+  // Legacy `reminders` table fallback for backward compatibility
+  if (dueOccurrences.length === 0) {
+    try {
+      const { data: rawReminders } = await adminSupabase
         .from('reminders')
-        .update({ status: finalStatus, updated_at: new Date().toISOString() })
-        .eq('id', r.id);
+        .select('*')
+        .in('status', ['scheduled', 'snoozed'])
+        .lte('scheduled_at', nowISO)
+        .eq('is_active', true);
+
+      if (rawReminders && rawReminders.length > 0) {
+        for (const r of rawReminders) {
+          const occId = crypto.randomUUID();
+          dueOccurrences.push({
+            id: occId,
+            reminder_id: r.id,
+            user_id: r.user_id,
+            scheduled_at: r.scheduled_at || nowISO,
+            status: 'processing',
+            notification_tag: `reminder-${r.id}-occurrence-${occId}`,
+            // Attach reminder parent definition details
+            title: r.title,
+            body: r.body,
+            time: r.time,
+            frequency: r.frequency,
+            timezone: r.timezone
+          });
+        }
+
+        // Lock legacy reminders
+        const rIds = rawReminders.map(r => r.id);
+        await adminSupabase
+          .from('reminders')
+          .update({ status: 'processing', updated_at: nowISO })
+          .in('id', rIds);
+      }
+    } catch (e: any) {
+      addLog(`Legacy reminders fallback notice: ${e.message}`);
     }
   }
 
-  // =========================================================================
-  // STRATEGY 2: Fallback `push_subscribers.reminders` JSONB array scan
-  // =========================================================================
-  for (const sub of subscribers) {
-    if (!sub.reminders || !Array.isArray(sub.reminders) || sub.reminders.length === 0) continue;
+  const foundCount = dueOccurrences.length;
+  addLog(`Found ${foundCount} due occurrences ready for push delivery`);
 
-    let subscriberJsonModified = false;
-    const updatedSubReminders = [...sub.reminders];
+  // 3. Process Each Due Occurrence
+  for (const occ of dueOccurrences) {
+    processedCount++;
 
-    for (let i = 0; i < updatedSubReminders.length; i++) {
-      const r = updatedSubReminders[i];
+    // Fetch parent reminder definition if details are missing
+    let reminderTitle = occ.title;
+    let reminderBody = occ.body;
+    let reminderTime = occ.time || '08:00';
+    let reminderFreq = occ.frequency || 'once';
+    let reminderTz = occ.timezone || 'Asia/Jakarta';
 
-      // ONLY process if status is 'scheduled' or 'snoozed' AND isActive is true
-      const rStatus = r.status || 'scheduled';
-      const rActive = r.isActive !== false;
+    if (!reminderTitle) {
+      const { data: rParent } = await adminSupabase
+        .from('reminders')
+        .select('*')
+        .eq('id', occ.reminder_id)
+        .single();
 
-      if (!rActive || (rStatus !== 'scheduled' && rStatus !== 'snoozed')) {
-        continue;
+      if (rParent) {
+        reminderTitle = rParent.title;
+        reminderBody = rParent.body;
+        reminderTime = rParent.time;
+        reminderFreq = rParent.frequency;
+        reminderTz = rParent.timezone;
+      } else {
+        reminderTitle = 'Pengingat AgendaRecap';
       }
+    }
 
-      let isDue = false;
+    const occurrenceId = occ.id;
+    const reminderId = occ.reminder_id;
+    const notificationTag = occ.notification_tag || `reminder-${reminderId}-occurrence-${occurrenceId}`;
 
-      if (r.scheduledAt) {
-        const scheduledTime = new Date(r.scheduledAt).getTime();
-        if (scheduledTime <= now.getTime()) {
-          isDue = true;
-        }
-      }
+    const scheduledLocal = formatLocalFromUTC(occ.scheduled_at || nowISO, reminderTz);
+    addLog(`Processing Occurrence ID=${occurrenceId} (Reminder ID=${reminderId}) Tag="${notificationTag}" Title="${reminderTitle}" ScheduledAt=${occ.scheduled_at} (${scheduledLocal})`);
 
-      if (isDue) {
-        foundCount++;
-        totalProcessed++;
-        const occurrenceId = crypto.randomUUID();
+    // Target devices matching user_id or all devices if single user
+    const targetSubs = subscribers.filter(s => !occ.user_id || s.user_id === occ.user_id || subscribers.length === 1);
+    const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
 
-        addLog(`Fallback Strategy: Due reminder found in push_subscribers JSON: id=${r.id} title="${r.title}"`);
+    // Build Web Push Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE
+    const payload = JSON.stringify({
+      type: 'reminder',
+      reminderId,
+      occurrenceId,
+      notificationTag,
+      title: reminderTitle,
+      body: reminderBody || `Waktu pengingat Anda (${reminderTime}) telah tiba!`,
+      scheduledAt: occ.scheduled_at,
+      isRecurring: reminderFreq !== 'once',
+      actions: [
+        { action: 'close', title: '❌ CLOSE' },
+        { action: 'snooze_5', title: '⏱ 5 MIN' },
+        { action: 'snooze_15', title: '⏱ 15 MIN' },
+        { action: 'snooze_60', title: '⏱ 1 HOUR' }
+      ]
+    });
 
-        // Claim in JSON array immediately so it won't loop
-        updatedSubReminders[i] = {
-          ...r,
-          status: 'sent',
-          isActive: false, // Mark inactive for one-time fallback to PREVENT LOOPING
-          updatedAt: nowISO
-        };
-        subscriberJsonModified = true;
-
-        // NO OPEN ACTION! ONLY CLOSE & SNOOZE
-        const payload = JSON.stringify({
-          type: 'reminder',
-          reminderId: r.id,
-          occurrenceId,
-          notificationTag: `reminder-${r.id}-${occurrenceId}`,
-          title: r.title,
-          body: r.body || `Waktu pengingat Anda (${r.time || 'sekarang'}) telah tiba!`,
-          scheduledAt: r.scheduledAt || nowISO,
-          isRecurring: r.frequency && r.frequency !== 'once',
-          source: r.title?.includes('Uji') ? 'scheduled-test' : 'scheduled',
-          actions: [
-            { action: 'close', title: '❌ CLOSE' },
-            { action: 'snooze_5', title: '⏱ 5 MIN' },
-            { action: 'snooze_15', title: '⏱ 15 MIN' },
-            { action: 'snooze_60', title: '⏱ 1 HOUR' }
-          ]
-        });
-
-        try {
-          const res = await webpush.sendNotification(sub.subscription, payload);
-          addLog(`Fallback push success status=${res.statusCode} for endpoint=${sub.endpoint.substring(0, 30)}...`);
-          successPushCount++;
-        } catch (err: any) {
-          failedPushCount++;
-          addLog(`Fallback push failed error=${err.message} statusCode=${err.statusCode}`);
-          if (err.statusCode === 404 || err.statusCode === 410) {
-            await supabase.from('push_subscribers').delete().eq('endpoint', sub.endpoint);
-          }
+    let pushSuccess = false;
+    for (const sub of subsToSend) {
+      addLog(`Sending Web Push to device endpoint=${sub.endpoint.substring(0, 35)}...`);
+      try {
+        const res = await webpush.sendNotification(sub.subscription, payload);
+        addLog(`Push delivered successfully status=${res.statusCode} endpoint=${sub.endpoint.substring(0, 30)}...`);
+        successPushCount++;
+        pushSuccess = true;
+      } catch (err: any) {
+        failedPushCount++;
+        addLog(`Push failed error=${err.message} statusCode=${err.statusCode}`);
+        if (err.statusCode === 404 || err.statusCode === 410) {
+          addLog(`Subscribed endpoint expired (404/410) -> Deleting stale subscription endpoint=${sub.endpoint.substring(0, 30)}...`);
+          await adminSupabase.from('push_subscribers').delete().eq('endpoint', sub.endpoint);
         }
       }
     }
 
-    // Persist updated JSON array to Supabase DB to permanently lock state
-    if (subscriberJsonModified) {
-      await supabase
-        .from('push_subscribers')
-        .update({ reminders: updatedSubReminders })
-        .eq('endpoint', sub.endpoint);
+    // Mark occurrence status as 'sent'
+    const finalStatus = pushSuccess ? 'sent' : 'failed';
+    try {
+      await adminSupabase
+        .from('reminder_occurrences')
+        .update({
+          status: finalStatus,
+          sent_at: nowISO,
+          updated_at: nowISO
+        })
+        .eq('id', occurrenceId);
+    } catch (e) {
+      // Legacy fallback update
+      await adminSupabase
+        .from('reminders')
+        .update({ status: finalStatus, updated_at: nowISO })
+        .eq('id', reminderId);
     }
   }
 
-  addLog(`Scheduler execution finished: Total Found=${foundCount}, SentPush=${successPushCount}, FailedPush=${failedPushCount}`);
+  addLog(`Scheduler execution completed: Checked=${foundCount}, Processed=${processedCount}, PushSuccess=${successPushCount}, PushFailed=${failedPushCount}`);
 
   return {
     success: true,
     checkedAt: nowISO,
     foundCount,
-    processedCount: totalProcessed,
+    processedCount,
     successPushCount,
     failedPushCount,
     logs
   };
+}
+
+// Function to generate the NEXT occurrence for recurring reminders upon completion
+export async function generateNextOccurrence(reminderId: string, completedOccurrenceScheduledAt: string): Promise<any> {
+  const adminSupabase = getAdminClient();
+
+  const { data: r } = await adminSupabase
+    .from('reminders')
+    .select('*')
+    .eq('id', reminderId)
+    .single();
+
+  if (!r || !r.is_active || r.frequency === 'once') return null;
+
+  const currentScheduled = new Date(completedOccurrenceScheduledAt);
+  let nextDate = new Date(currentScheduled.getTime());
+
+  if (r.frequency === 'daily') {
+    nextDate.setDate(nextDate.getDate() + 1);
+  } else if (r.frequency === 'weekdays') {
+    do {
+      nextDate.setDate(nextDate.getDate() + 1);
+    } while (nextDate.getDay() === 0 || nextDate.getDay() === 6);
+  } else if (r.frequency === 'weekly') {
+    nextDate.setDate(nextDate.getDate() + 7);
+  }
+
+  const nextScheduledISO = nextDate.toISOString();
+  const nextOccurrenceId = crypto.randomUUID();
+
+  const nextOccurrence = {
+    id: nextOccurrenceId,
+    reminder_id: reminderId,
+    user_id: r.user_id,
+    scheduled_at: nextScheduledISO,
+    status: 'scheduled',
+    notification_tag: `reminder-${reminderId}-occurrence-${nextOccurrenceId}`,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  try {
+    await adminSupabase.from('reminder_occurrences').insert(nextOccurrence);
+    console.log(`[RECURRING] Generated next occurrence for reminder ${reminderId} -> Target: ${nextScheduledISO}`);
+  } catch (e) {
+    console.warn('[RECURRING] Failed to insert next occurrence:', e);
+  }
+
+  return nextOccurrence;
 }
