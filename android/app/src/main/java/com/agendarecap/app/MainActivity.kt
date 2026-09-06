@@ -13,9 +13,11 @@ import android.util.Log
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
+import androidx.webkit.WebViewAssetLoader
 import com.getcapacitor.BridgeActivity
 import com.getcapacitor.BridgeWebViewClient
 
@@ -28,25 +30,34 @@ class MainActivity : BridgeActivity() {
         private const val KEY_LAST_CRASH_TIME = "last_crash_time_ms"
         private const val MAX_NETWORK_RETRIES = 3
         private const val MAIN_APP_URL = "https://agendarecap.vercel.app"
-        private const val OFFLINE_FALLBACK_URL = "file:///android_asset/public/index.html"
+        private const val ASSET_DOMAIN = "appassets.androidview.sandbox"
+        private const val OFFLINE_FALLBACK_URL = "https://appassets.androidview.sandbox/public/index.html"
     }
 
     private var networkRetryCount = 0
     private var isFallbackLoaded = false
     private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var assetLoader: WebViewAssetLoader
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Log.d(TAG, "MainActivity created (Kotlin Engine)")
+        Log.d(TAG, "MainActivity created (WebViewAssetLoader Engine)")
         registerPlugin(NativeAlarmPlugin::class.java)
 
         // Prevent restoring stale WebView error state on cold start
         super.onCreate(null)
 
+        // Initialize WebViewAssetLoader for safe offline asset handling over https://appassets.androidview.sandbox/
+        assetLoader = WebViewAssetLoader.Builder()
+            .setDomain(ASSET_DOMAIN)
+            .addPathHandler("/public/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
+
         setupBackNavigation()
 
         val webView = bridge.webView
         if (webView != null) {
-            Log.d(TAG, "Configuring WebView settings and network handling")
+            Log.d(TAG, "Configuring WebView settings with Asset Loader")
             configureWebView(webView)
         }
 
@@ -65,6 +76,17 @@ class MainActivity : BridgeActivity() {
         settings.cacheMode = WebSettings.LOAD_DEFAULT
 
         webView.webViewClient = object : BridgeWebViewClient(this.bridge) {
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                if (request != null && request.url != null) {
+                    val interceptedResponse = assetLoader.shouldInterceptRequest(request.url)
+                    if (interceptedResponse != null) {
+                        Log.d(TAG, "AssetLoader intercepted request: ${request.url}")
+                        return interceptedResponse
+                    }
+                }
+                return super.shouldInterceptRequest(view, request)
+            }
+
             override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
                 Log.d(TAG, "Page started loading: $url")
@@ -141,7 +163,7 @@ class MainActivity : BridgeActivity() {
                             }
                         }, delayMs)
                     } else if (!isFallbackLoaded) {
-                        Log.e(TAG, "Network retries exhausted. Displaying custom offline fallback screen.")
+                        Log.e(TAG, "Network retries exhausted. Displaying custom WebViewAssetLoader offline shell.")
                         if (view != null) {
                             loadOfflineFallback(view)
                         }
@@ -158,7 +180,7 @@ class MainActivity : BridgeActivity() {
             isFallbackLoaded = false
             webView.loadUrl(MAIN_APP_URL)
         } else {
-            Log.w(TAG, "Device offline. Displaying custom offline HTML fallback.")
+            Log.w(TAG, "Device offline. Displaying custom offline asset shell via WebViewAssetLoader.")
             loadOfflineFallback(webView)
         }
     }
