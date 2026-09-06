@@ -156,7 +156,27 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  // Handle CLOSE Action or Body Click (Mark current occurrence completed)
+  // Handle Body Click (no action specified) -> Open/Focus window navigating to Agenda Detail or Reminders page
+  if (!action || action === 'open' || action === '') {
+    const targetUrl = notificationData.agendaId ? `/consultation?id=${notificationData.agendaId}` : (notificationData.url || '/reminders');
+    console.log(`[SW v5] Body clicked -> Navigating client to ${targetUrl}`);
+    event.waitUntil(
+      self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+        for (const client of clientList) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            client.navigate(targetUrl);
+            return client.focus();
+          }
+        }
+        if (self.clients.openWindow) {
+          return self.clients.openWindow(targetUrl);
+        }
+      })
+    );
+    return;
+  }
+
+  // Handle CLOSE Action (Mark current occurrence/reminder completed)
   console.log(`[SW v5] Action CLOSE: Marking reminderId=${reminderId} occurrenceId=${occurrenceId} completed`);
 
   event.waitUntil(
