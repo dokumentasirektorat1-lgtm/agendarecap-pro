@@ -211,8 +211,8 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     const targetSubs = subscribers.filter(s => !occ.user_id || s.user_id === occ.user_id || subscribers.length === 1);
     const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
 
-    // Build Web Push Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE
-    const payload = JSON.stringify({
+    // Build Web Push & FCM Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE
+    const payloadData = {
       type: 'reminder',
       reminderId,
       occurrenceId,
@@ -227,22 +227,58 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
         { action: 'snooze_15', title: '⏱ 15 MIN' },
         { action: 'snooze_60', title: '⏱ 1 HOUR' }
       ]
-    });
+    };
+    const payload = JSON.stringify(payloadData);
 
     let pushSuccess = false;
     for (const sub of subsToSend) {
-      addLog(`Sending Web Push to device endpoint=${sub.endpoint.substring(0, 35)}...`);
+      addLog(`Sending Push Notification to device endpoint=${sub.endpoint.substring(0, 35)}...`);
+      
+      // 1. Send via WebPush
       try {
         const res = await webpush.sendNotification(sub.subscription, payload);
-        addLog(`Push delivered successfully status=${res.statusCode} endpoint=${sub.endpoint.substring(0, 30)}...`);
+        addLog(`WebPush delivered successfully status=${res.statusCode} endpoint=${sub.endpoint.substring(0, 30)}...`);
         successPushCount++;
         pushSuccess = true;
       } catch (err: any) {
         failedPushCount++;
-        addLog(`Push failed error=${err.message} statusCode=${err.statusCode}`);
+        addLog(`WebPush failed error=${err.message} statusCode=${err.statusCode}`);
         if (err.statusCode === 404 || err.statusCode === 410) {
           addLog(`Subscribed endpoint expired (404/410) -> Deleting stale subscription endpoint=${sub.endpoint.substring(0, 30)}...`);
           await adminSupabase.from('push_subscribers').delete().eq('endpoint', sub.endpoint);
+        }
+      }
+
+      // 2. Direct FCM Push payload if subscription contains fcm_token
+      if (sub.subscription && sub.subscription.fcm_token) {
+        const fcmServerKey = process.env.FCM_SERVER_KEY;
+        if (fcmServerKey) {
+          try {
+            addLog(`Sending FCM High-Priority Floating push to token=${sub.subscription.fcm_token.substring(0, 15)}...`);
+            const fcmRes = await fetch('https://fcm.googleapis.com/fcm/send', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `key=${fcmServerKey}`
+              },
+              body: JSON.stringify({
+                to: sub.subscription.fcm_token,
+                priority: 'high',
+                data: {
+                  title: reminderTitle,
+                  body: reminderBody || `Waktu pengingat Anda (${reminderTime}) telah tiba!`,
+                  reminderId,
+                  occurrenceId
+                }
+              })
+            });
+            if (fcmRes.ok) {
+              addLog(`FCM Floating Push delivered successfully to token=${sub.subscription.fcm_token.substring(0, 15)}...`);
+              pushSuccess = true;
+            }
+          } catch (fcmErr: any) {
+            addLog(`FCM Push warning: ${fcmErr.message}`);
+          }
         }
       }
     }

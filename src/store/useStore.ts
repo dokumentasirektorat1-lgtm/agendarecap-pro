@@ -20,6 +20,7 @@ export type Agenda = {
   meetingId?: string;
   meetingPasscode?: string;
   isUrgent?: boolean;
+  created_at?: string;
   updated_at: string;
 };
 
@@ -28,12 +29,14 @@ type StoreState = {
   sharedDates: Record<string, string>; // Maps "YYYY-MM-DD" to ISO "last_shared_at"
   isLoading: boolean;
   error: string | null;
+  subscriptionActive: boolean;
   fetchAgendas: () => Promise<void>;
   addAgenda: (agenda: Omit<Agenda, "id" | "is_completed" | "updated_at">) => Promise<boolean>;
   toggleComplete: (id: string) => Promise<void>;
   deleteAgenda: (id: string) => Promise<boolean>;
   updateAgenda: (id: string, updates: Partial<Agenda>) => Promise<boolean>;
   markAsShared: (dateKey: string, timestamp: string) => void;
+  subscribeRealtime: () => () => void;
 };
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -41,6 +44,7 @@ export const useStore = create<StoreState>((set, get) => ({
   sharedDates: {},
   isLoading: true,
   error: null,
+  subscriptionActive: false,
 
   fetchAgendas: async () => {
     set({ isLoading: true, error: null });
@@ -50,11 +54,18 @@ export const useStore = create<StoreState>((set, get) => ({
       const { data: { user }, error: authError } = await supabase.auth.getUser();
 
       if (authError || !user) {
+        // Fallback to fetch API route if user session check in client client is resolving
+        const res = await fetch('/api/agendas');
+        if (res.ok) {
+          const json = await res.json();
+          set({ agendas: json.agendas || [], isLoading: false, error: null });
+          return;
+        }
         set({ error: "Gagal memverifikasi sesi login Anda.", isLoading: false });
         return;
       }
 
-      // Ambil data hanya punya user bersangkutan (karena RLS aktif, ini otomatis aman)
+      // Query centralized Supabase database table 'agendas'
       const { data, error } = await supabase
         .from("agendas")
         .select("*")
@@ -67,7 +78,7 @@ export const useStore = create<StoreState>((set, get) => ({
         set({ agendas: data || [], isLoading: false, error: null });
       }
     } catch (e: any) {
-      console.error(e);
+      console.error("Fetch agendas error:", e);
       set({ error: e.message || "Terjadi kesalahan sistem", isLoading: false });
     }
   },
@@ -79,33 +90,45 @@ export const useStore = create<StoreState>((set, get) => ({
 
       const newAgenda = {
         ...agenda,
-        user_id: user?.id, // Jika tidak ada user ID, RLS supabase akan menolak secara otomatis
+        id: crypto.randomUUID(),
+        user_id: user?.id,
         is_completed: false,
         status: agenda.status || 'confirmed',
         isShareable: agenda.isShareable !== undefined ? agenda.isShareable : true,
         isOnline: agenda.isOnline || false,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
-        .from("agendas")
-        .insert(newAgenda)
-        .select()
-        .single();
+      // Optimistic update
+      set((state) => ({
+        agendas: [...state.agendas, newAgenda as Agenda].sort(
+          (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+        ),
+      }));
 
-      if (error) {
-        throw error;
+      const res = await fetch('/api/agendas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newAgenda)
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json();
+        throw new Error(errJson.error || 'Gagal menyimpan agenda ke backend.');
       }
 
-      if (data) {
+      const json = await res.json();
+      if (json.agenda) {
+        // Sync state with server returned object
         set((state) => ({
-          agendas: [...state.agendas, data].sort(
-            (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
-          ),
+          agendas: state.agendas
+            .map(a => a.id === newAgenda.id ? json.agenda : a)
+            .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
         }));
-        return true;
       }
-      return false;
+
+      return true;
     } catch (e: any) {
       console.error("Gagal menambahkan agenda:", e?.message || e);
       Swal.fire({
@@ -113,6 +136,8 @@ export const useStore = create<StoreState>((set, get) => ({
         title: 'Gagal Tambah Data',
         text: e?.message || e?.details || 'Agenda gagal disimpan ke database. Coba lagi.'
       });
+      // Revert fetch
+      get().fetchAgendas();
       return false;
     }
   },
@@ -122,23 +147,28 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!currentAgenda) return;
 
     const newStatus = !currentAgenda.is_completed;
+    const updatedAt = new Date().toISOString();
 
     // Optimistic Update
     set((state) => ({
       agendas: state.agendas.map((a) =>
         a.id === id 
-          ? { ...a, is_completed: newStatus, updated_at: new Date().toISOString() } 
+          ? { ...a, is_completed: newStatus, updated_at: updatedAt } 
           : a
       ),
     }));
 
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("agendas")
-      .update({ is_completed: newStatus, updated_at: new Date().toISOString() })
-      .eq("id", id);
+    try {
+      const res = await fetch(`/api/agendas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_completed: newStatus })
+      });
 
-    if (error) {
+      if (!res.ok) {
+        throw new Error('Gagal update status di server');
+      }
+    } catch (error: any) {
       console.error("Gagal update status:", error);
       Swal.fire({ toast: true, position: 'top-end', icon: 'error', text: 'Gagal mengubah status', showConfirmButton: false, timer: 3000 });
       // Revert Optimistic Update
@@ -158,10 +188,17 @@ export const useStore = create<StoreState>((set, get) => ({
       agendas: state.agendas.filter((a) => a.id !== id),
     }));
 
-    const supabase = createClient();
-    const { error } = await supabase.from("agendas").delete().eq("id", id);
-    
-    if (error) {
+    try {
+      const res = await fetch(`/api/agendas/${id}`, {
+        method: 'DELETE'
+      });
+
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || 'Gagal menghapus agenda dari server.');
+      }
+      return true;
+    } catch (error: any) {
       console.error("Gagal menghapus:", error);
       Swal.fire({
         icon: 'error',
@@ -172,27 +209,32 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ agendas: previousAgendas });
       return false;
     }
-    
-    return true;
   },
 
   updateAgenda: async (id, updates) => {
     const previousAgendas = get().agendas;
+    const updatedAt = new Date().toISOString();
 
     // Optimistic Update
     set((state) => ({
       agendas: state.agendas.map((a) => 
-        (a.id === id ? { ...a, ...updates, updated_at: new Date().toISOString() } : a)
+        (a.id === id ? { ...a, ...updates, updated_at: updatedAt } : a)
       ),
     }));
 
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("agendas")
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq("id", id);
+    try {
+      const res = await fetch(`/api/agendas/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
 
-    if (error) {
+      if (!res.ok) {
+        const json = await res.json();
+        throw new Error(json.error || 'Gagal mengupdate agenda.');
+      }
+      return true;
+    } catch (error: any) {
       console.error("Gagal mengupdate agenda:", error?.message || error);
       Swal.fire({
         icon: 'error',
@@ -203,15 +245,38 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ agendas: previousAgendas });
       return false;
     }
-    return true;
   },
 
   markAsShared: (dateKey, timestamp) =>
     set((state) => ({
       sharedDates: {
         ...state.sharedDates,
-        // Only set it if it's not already set, so it acts as 'firstSharedAt'
         [dateKey]: state.sharedDates[dateKey] || timestamp,
       }
     })),
+
+  subscribeRealtime: () => {
+    const supabase = createClient();
+
+    const channel = supabase
+      .channel('public:agendas')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'agendas' },
+        (payload) => {
+          console.log('[STORE] Realtime agenda change detected:', payload);
+          get().fetchAgendas();
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          set({ subscriptionActive: true });
+        }
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+      set({ subscriptionActive: false });
+    };
+  }
 }));
