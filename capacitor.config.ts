@@ -22,6 +22,9 @@ const config: CapacitorConfig = {
       iconColor: '#3B82F6',
       sound: 'beep.wav',
     },
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
   },
 };
 
