@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { getRemindersFromIDB, getOccurrencesFromIDB, saveRemindersToIDB, saveOccurrencesToIDB, updateSingleReminderInIDB, updateOccurrenceInIDB, deleteReminderFromIDB, addToOfflineQueue, IDBReminder, IDBOccurrence } from "@/lib/idb";
-import { runSyncEngine, initSyncEngineListeners } from "@/lib/sync-engine";
-import { getUTCISOFromLocal } from "@/lib/timezone";
-import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm, initNativeAlarmListeners } from "@/lib/native-alarm";
+import { IDBReminder, IDBOccurrence } from "@/lib/idb";
+import { reminderRepository } from "@/lib/repositories/reminder-repository";
+import { syncRepository } from "@/lib/repositories/sync-repository";
+import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm } from "@/lib/native-alarm";
 
 export type Frequency = "once" | "daily" | "weekdays" | "weekly";
 export type OccurrenceStatus = "scheduled" | "processing" | "sent" | "snoozed" | "completed" | "dismissed" | "cancelled" | "failed";
@@ -22,7 +22,6 @@ export interface ReminderItem {
   deliveryMode?: 'hybrid' | 'server' | 'local';
   createdAt: string;
   updatedAt?: string;
-  // Attached current active occurrence
   currentOccurrence?: IDBOccurrence;
 }
 
@@ -75,52 +74,10 @@ export const useReminderStore = create<ReminderStoreState>()(
       fetchReminders: async () => {
         set({ isLoading: true });
 
-        // 1. Instant local IndexedDB load
         try {
-          let localReminders = await getRemindersFromIDB();
-          let localOccurrences = await getOccurrencesFromIDB();
-
-          // Native Android Alarm Storage Reconciliation
-          if (isNativePlatform()) {
-            try {
-              const { getScheduledNativeAlarms } = await import('@/lib/native-alarm');
-              const scheduledNative = await getScheduledNativeAlarms();
-              const nativeOccurrenceMap = new Map<string, any>();
-              scheduledNative.forEach((item: any) => {
-                if (item && item.occurrenceId) {
-                  nativeOccurrenceMap.set(item.occurrenceId, item);
-                }
-              });
-
-              let hasLocalUpdates = false;
-              for (const occ of localOccurrences) {
-                if (occ.status === 'scheduled' || occ.status === 'snoozed') {
-                  const nativeItem = nativeOccurrenceMap.get(occ.id);
-                  if (nativeItem) {
-                    // Check if snoozed natively
-                    if (nativeItem.scheduledAtMs && Math.abs(new Date(occ.scheduledAt).getTime() - nativeItem.scheduledAtMs) > 1000) {
-                      occ.status = 'snoozed';
-                      occ.snoozedUntil = new Date(nativeItem.scheduledAtMs).toISOString();
-                      await updateOccurrenceInIDB(occ);
-                      hasLocalUpdates = true;
-                    }
-                  } else if (new Date(occ.scheduledAt).getTime() < Date.now() - 30000) {
-                    // Closed natively while app was terminated
-                    occ.status = 'completed';
-                    occ.completedAt = new Date().toISOString();
-                    await updateOccurrenceInIDB(occ);
-                    hasLocalUpdates = true;
-                  }
-                }
-              }
-
-              if (hasLocalUpdates) {
-                localOccurrences = await getOccurrencesFromIDB();
-              }
-            } catch (nativeErr) {
-              console.warn('[STORE] Native alarm reconciliation warning:', nativeErr);
-            }
-          }
+          // 1. Instant local IndexedDB load (Local First)
+          const localReminders = await reminderRepository.getLocalReminders();
+          const localOccurrences = await reminderRepository.getLocalOccurrences();
 
           const mapped: ReminderItem[] = localReminders.map(r => {
             const activeOcc = localOccurrences.find(o => o.reminderId === r.id && (o.status === 'scheduled' || o.status === 'snoozed' || o.status === 'processing'));
@@ -131,269 +88,68 @@ export const useReminderStore = create<ReminderStoreState>()(
           });
 
           set({ reminders: mapped, occurrences: localOccurrences });
-        } catch (err) {
-          console.warn('[STORE] IndexedDB initial read warning:', err);
-        }
 
-        // 2. Network Server Sync with Union Merge Reconciliation
-        if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await runSyncEngine();
+          // 2. Background Sync if online
+          if (typeof navigator !== 'undefined' && navigator.onLine) {
+            await syncRepository.runSync();
 
-            const res = await fetch('/api/reminders', { cache: 'no-store' });
-            if (res.ok) {
-              const data = await res.json();
-              const localReminders = await getRemindersFromIDB();
-              const localOccurrences = await getOccurrencesFromIDB();
+            const updatedReminders = await reminderRepository.getLocalReminders();
+            const updatedOccurrences = await reminderRepository.getLocalOccurrences();
 
-              const reminderMap = new Map<string, IDBReminder>();
-              localReminders.forEach(r => reminderMap.set(r.id, r));
+            const updatedMapped: ReminderItem[] = updatedReminders.map(r => {
+              const activeOcc = updatedOccurrences.find(o => o.reminderId === r.id && (o.status === 'scheduled' || o.status === 'snoozed' || o.status === 'processing'));
+              return {
+                ...r,
+                currentOccurrence: activeOcc || updatedOccurrences.filter(o => o.reminderId === r.id).pop()
+              };
+            });
 
-              if (data.reminders && Array.isArray(data.reminders)) {
-                data.reminders.forEach((r: any) => {
-                  reminderMap.set(r.id, {
-                    id: r.id,
-                    user_id: r.user_id,
-                    title: r.title,
-                    body: r.body,
-                    time: r.time || '08:00',
-                    timezone: r.timezone || 'Asia/Jakarta',
-                    frequency: r.frequency || 'once',
-                    daysOfWeek: r.days_of_week,
-                    sound: r.sound || 'default',
-                    isActive: r.is_active !== undefined ? r.is_active : true,
-                    deliveryMode: r.delivery_mode || 'hybrid',
-                    createdAt: r.created_at || new Date().toISOString(),
-                    updatedAt: r.updated_at
-                  });
-                });
-              }
-
-              const mergedReminders = Array.from(reminderMap.values());
-
-              const occurrenceMap = new Map<string, IDBOccurrence>();
-              localOccurrences.forEach(o => occurrenceMap.set(o.id, o));
-
-              if (data.occurrences && Array.isArray(data.occurrences)) {
-                data.occurrences.forEach((o: any) => {
-                  occurrenceMap.set(o.id, {
-                    id: o.id,
-                    reminderId: o.reminder_id,
-                    user_id: o.user_id,
-                    scheduledAt: o.scheduled_at,
-                    status: o.status,
-                    snoozedUntil: o.snoozed_until,
-                    sentAt: o.sent_at,
-                    completedAt: o.completed_at,
-                    dismissedAt: o.dismissed_at,
-                    notificationTag: o.notification_tag || `reminder-${o.reminder_id}-occurrence-${o.id}`,
-                    createdAt: o.created_at,
-                    updatedAt: o.updated_at
-                  });
-                });
-              }
-
-              const mergedOccurrences = Array.from(occurrenceMap.values());
-
-              const mapped: ReminderItem[] = mergedReminders.map(r => {
-                const activeOcc = mergedOccurrences.find(o => o.reminderId === r.id && (o.status === 'scheduled' || o.status === 'snoozed' || o.status === 'processing'));
-                return {
-                  ...r,
-                  currentOccurrence: activeOcc || mergedOccurrences.filter(o => o.reminderId === r.id).pop()
-                };
-              });
-
-              set({ reminders: mapped, occurrences: mergedOccurrences, dbSynced: true, isOffline: false });
-              await saveRemindersToIDB(mergedReminders);
-              await saveOccurrencesToIDB(mergedOccurrences);
-            }
-          } catch (e) {
-            console.error('[STORE] Server fetch error:', e);
-            set({ dbSynced: false, isOffline: true });
+            set({ reminders: updatedMapped, occurrences: updatedOccurrences, dbSynced: true, isOffline: false });
+          } else {
+            set({ isOffline: true });
           }
-        } else {
-          set({ isOffline: true });
+        } catch (err) {
+          console.warn('[REMINDER STORE] IndexedDB initial read error:', err);
+        } finally {
+          set({ isLoading: false });
         }
-
-        set({ isLoading: false });
       },
 
       addReminder: async (input) => {
-        const reminderId = input.id || crypto.randomUUID();
-        const occurrenceId = crypto.randomUUID();
-        const now = new Date();
-        const userTimezone = input.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Jakarta";
+        // 1. Local-first Repository Create
+        const { reminder, occurrence } = await reminderRepository.create(input);
 
-        let scheduledAtISO = input.scheduledAt;
-        if (!scheduledAtISO && input.time) {
-          const targetDateStr = input.scheduledDate || now.toISOString().split("T")[0];
-          scheduledAtISO = getUTCISOFromLocal(targetDateStr, input.time, userTimezone);
-          if (new Date(scheduledAtISO).getTime() < now.getTime() && !input.scheduledDate) {
-            const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-            const tomorrowStr = tomorrow.toISOString().split("T")[0];
-            scheduledAtISO = getUTCISOFromLocal(tomorrowStr, input.time, userTimezone);
-          }
-        }
-
-        if (!scheduledAtISO) scheduledAtISO = now.toISOString();
-
-        const newReminder: IDBReminder = {
-          id: reminderId,
-          title: input.title.trim(),
-          body: input.body || '',
-          time: input.time || "08:00",
-          timezone: userTimezone,
-          frequency: input.frequency || "once",
-          daysOfWeek: input.daysOfWeek,
-          sound: input.sound || "default",
-          isActive: true,
-          deliveryMode: 'hybrid',
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString()
-        };
-
-        const newOccurrence: IDBOccurrence = {
-          id: occurrenceId,
-          reminderId,
-          scheduledAt: scheduledAtISO,
-          status: "scheduled",
-          notificationTag: `reminder-${reminderId}-occurrence-${occurrenceId}`,
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString()
-        };
-
-        // 1. Optimistic Local Update
-        const filteredReminders = get().reminders.filter(r => r.id !== reminderId);
-        const filteredOccs = get().occurrences.filter(o => o.reminderId !== reminderId);
-
-        const updatedOccurrences = [...filteredOccs, newOccurrence];
-        const updatedReminders = [...filteredReminders, { ...newReminder, currentOccurrence: newOccurrence }].sort((a, b) => {
-          const timeA = a.currentOccurrence?.scheduledAt ? new Date(a.currentOccurrence.scheduledAt).getTime() : 0;
-          const timeB = b.currentOccurrence?.scheduledAt ? new Date(b.currentOccurrence.scheduledAt).getTime() : 0;
-          return timeA - timeB;
-        });
-
-        set({ reminders: updatedReminders, occurrences: updatedOccurrences });
-        await updateSingleReminderInIDB(newReminder);
-        await updateOccurrenceInIDB(newOccurrence);
-
-        // Schedule Native Android Local Alarm if native platform
+        // 2. Schedule Native Alarm if on Android
         if (isNativePlatform()) {
           scheduleNativeLocalAlarm({
-            reminderId,
-            occurrenceId,
-            title: input.title.trim(),
-            body: input.body || '',
-            sound: input.sound || 'default',
-            scheduledAt: scheduledAtISO
+            reminderId: reminder.id,
+            occurrenceId: occurrence.id,
+            title: reminder.title,
+            body: reminder.body || '',
+            sound: reminder.sound || 'default',
+            scheduledAt: occurrence.scheduledAt
           });
         }
 
-        // 2. Immediate Server Upload Sync
-        const payload = {
-          id: reminderId,
-          title: input.title.trim(),
-          body: input.body || '',
-          time: input.time || "08:00",
-          scheduledAt: scheduledAtISO,
-          timezone: userTimezone,
-          frequency: input.frequency || "once",
-          sound: input.sound || "default",
-          daysOfWeek: input.daysOfWeek
-        };
+        // 3. Update UI State immediately
+        await get().fetchReminders();
 
+        // 4. Trigger background sync
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch('/api/reminders', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-            set({ dbSynced: true });
-          } catch (e) {
-            console.warn('[STORE] Server offline -> Adding CREATE_REMINDER to offline queue');
-            await addToOfflineQueue({ type: 'CREATE_REMINDER', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'CREATE_REMINDER', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
       updateReminder: async (id, input) => {
-        const target = get().reminders.find(r => r.id === id);
-        if (!target) return;
+        // 1. Local-first Repository Update
+        await reminderRepository.update(id, input);
 
-        const now = new Date();
-        const userTimezone = input.timezone || target.timezone || "Asia/Jakarta";
+        // 2. Update UI State
+        await get().fetchReminders();
 
-        let scheduledAtISO = target.currentOccurrence?.scheduledAt;
-        if (input.time) {
-          const targetDateStr = input.scheduledDate || now.toISOString().split("T")[0];
-          scheduledAtISO = getUTCISOFromLocal(targetDateStr, input.time, userTimezone);
-        }
-
-        const updatedReminderObj: IDBReminder = {
-          ...target,
-          title: input.title.trim(),
-          body: input.body !== undefined ? input.body : target.body,
-          time: input.time || target.time,
-          timezone: userTimezone,
-          frequency: input.frequency || target.frequency,
-          daysOfWeek: input.daysOfWeek !== undefined ? input.daysOfWeek : target.daysOfWeek,
-          sound: input.sound || target.sound,
-          updatedAt: now.toISOString()
-        };
-
-        const updatedOccurrences = get().occurrences.map(o => {
-          if (o.reminderId === id) {
-            return {
-              ...o,
-              scheduledAt: scheduledAtISO || o.scheduledAt,
-              updatedAt: now.toISOString()
-            };
-          }
-          return o;
-        });
-
-        const updatedReminders = get().reminders.map(r => {
-          if (r.id === id) {
-            const activeOcc = updatedOccurrences.find(o => o.reminderId === id);
-            return { ...updatedReminderObj, currentOccurrence: activeOcc };
-          }
-          return r;
-        });
-
-        set({ reminders: updatedReminders, occurrences: updatedOccurrences });
-        await updateSingleReminderInIDB(updatedReminderObj);
-
-        const activeOccToUpdate = updatedOccurrences.find(o => o.reminderId === id);
-        if (activeOccToUpdate) await updateOccurrenceInIDB(activeOccToUpdate);
-
-        // Server Upload
-        const payload = {
-          id,
-          title: input.title.trim(),
-          body: input.body,
-          time: input.time,
-          scheduledAt: scheduledAtISO,
-          timezone: userTimezone,
-          frequency: input.frequency,
-          sound: input.sound,
-          daysOfWeek: input.daysOfWeek
-        };
-
+        // 3. Trigger background sync
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch(`/api/reminders/${id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-          } catch (e) {
-            await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
@@ -401,225 +157,87 @@ export const useReminderStore = create<ReminderStoreState>()(
         const target = get().reminders.find(r => r.id === id);
         if (!target) return;
 
-        const now = new Date();
-        const userTimezone = target.timezone || "Asia/Jakarta";
-        const todayStr = now.toISOString().split("T")[0];
-
-        // Calculate next upcoming execution time
-        let nextScheduledISO = getUTCISOFromLocal(todayStr, target.time || "08:00", userTimezone);
-        if (new Date(nextScheduledISO).getTime() <= now.getTime()) {
-          const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-          const tomorrowStr = tomorrow.toISOString().split("T")[0];
-          nextScheduledISO = getUTCISOFromLocal(tomorrowStr, target.time || "08:00", userTimezone);
-        }
-
-        const occurrenceId = crypto.randomUUID();
-        const newOccurrence: IDBOccurrence = {
-          id: occurrenceId,
-          reminderId: id,
-          scheduledAt: nextScheduledISO,
-          status: 'scheduled',
-          notificationTag: `reminder-${id}-occurrence-${occurrenceId}`,
-          createdAt: now.toISOString(),
-          updatedAt: now.toISOString()
-        };
-
-        const updatedReminderObj: IDBReminder = {
-          ...target,
-          isActive: true,
-          updatedAt: now.toISOString()
-        };
-
-        // Filter out old completed occurrences for this reminder and attach new active scheduled occurrence
-        const filteredOccs = get().occurrences.filter(o => o.reminderId !== id);
-        const updatedOccurrences = [...filteredOccs, newOccurrence];
-
-        const updatedReminders = get().reminders.map(r => {
-          if (r.id === id) {
-            return { ...updatedReminderObj, currentOccurrence: newOccurrence };
-          }
-          return r;
+        const res = await reminderRepository.create({
+          id: target.id,
+          title: target.title,
+          body: target.body,
+          time: target.time,
+          timezone: target.timezone,
+          frequency: target.frequency,
+          sound: target.sound,
+          daysOfWeek: target.daysOfWeek
         });
-
-        set({ reminders: updatedReminders, occurrences: updatedOccurrences });
-
-        await updateSingleReminderInIDB(updatedReminderObj);
-        await updateOccurrenceInIDB(newOccurrence);
 
         if (isNativePlatform()) {
           scheduleNativeLocalAlarm({
-            reminderId: id,
-            occurrenceId,
-            title: target.title,
-            body: target.body,
-            sound: target.sound || 'default',
-            scheduledAt: nextScheduledISO
+            reminderId: res.reminder.id,
+            occurrenceId: res.occurrence.id,
+            title: res.reminder.title,
+            body: res.reminder.body || '',
+            sound: res.reminder.sound || 'default',
+            scheduledAt: res.occurrence.scheduledAt
           });
         }
 
-        // Upload to server
-        const payload = {
-          id,
-          isActive: true,
-          scheduledAt: nextScheduledISO
-        };
+        await get().fetchReminders();
 
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch(`/api/reminders/${id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'scheduled', isActive: true, occurrenceId })
-            });
-
-            // Also ensure reminder record is posted if missing
-            await fetch('/api/reminders', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                id,
-                title: target.title,
-                body: target.body,
-                time: target.time,
-                scheduledAt: nextScheduledISO,
-                timezone: userTimezone,
-                frequency: target.frequency
-              })
-            });
-          } catch (e) {
-            await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
       snoozeOccurrence: async (reminderId, occurrenceId, minutes) => {
-        const now = new Date();
-        const snoozeDate = new Date(now.getTime() + minutes * 60 * 1000);
-        const snoozeISO = snoozeDate.toISOString();
+        // 1. Local-first Repository Snooze
+        const updatedOcc = await reminderRepository.snoozeOccurrence(reminderId, occurrenceId, minutes);
 
-        // 1. Optimistic Update
-        const updatedOccs = get().occurrences.map(o => {
-          if (o.reminderId === reminderId && (o.id === occurrenceId || occurrenceId === 'unknown')) {
-            return {
-              ...o,
-              status: 'snoozed' as OccurrenceStatus,
-              snoozedUntil: snoozeISO,
-              updatedAt: now.toISOString()
-            };
-          }
-          return o;
-        });
-
-        const updatedReminders = get().reminders.map(r => {
-          if (r.id === reminderId) {
-            const updatedOcc = updatedOccs.find(o => o.reminderId === reminderId);
-            return { ...r, currentOccurrence: updatedOcc };
-          }
-          return r;
-        });
-
-        set({ reminders: updatedReminders, occurrences: updatedOccs });
-
-        const occToSave = updatedOccs.find(o => o.reminderId === reminderId);
-        if (occToSave) await updateOccurrenceInIDB(occToSave);
-
-        if (isNativePlatform()) {
+        if (isNativePlatform() && updatedOcc) {
           const targetRem = get().reminders.find(r => r.id === reminderId);
           scheduleNativeLocalAlarm({
             reminderId,
-            occurrenceId: occurrenceId || 'unknown',
+            occurrenceId: updatedOcc.id,
             title: targetRem?.title || 'Pengingat AgendaRecap',
             body: targetRem?.body || '',
             sound: targetRem?.sound || 'default',
-            scheduledAt: snoozeISO
+            scheduledAt: updatedOcc.snoozedUntil || updatedOcc.scheduledAt
           });
         }
 
-        // 2. Server Sync or Queue
-        const payload = { reminderId, occurrenceId, minutes };
+        // 2. Update UI State
+        await get().fetchReminders();
+
+        // 3. Background Sync
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch(`/api/reminders/${reminderId}/snooze`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-          } catch (e) {
-            await addToOfflineQueue({ type: 'SNOOZE_OCCURRENCE', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'SNOOZE_OCCURRENCE', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
       completeOccurrence: async (reminderId, occurrenceId) => {
-        const nowISO = new Date().toISOString();
-
-        // 1. Optimistic Update
-        const updatedOccs = get().occurrences.map(o => {
-          if (o.reminderId === reminderId && (o.id === occurrenceId || occurrenceId === 'unknown')) {
-            return {
-              ...o,
-              status: 'completed' as OccurrenceStatus,
-              completedAt: nowISO,
-              updatedAt: nowISO
-            };
-          }
-          return o;
-        });
-
-        const updatedReminders = get().reminders.map(r => {
-          if (r.id === reminderId) {
-            const updatedOcc = updatedOccs.find(o => o.reminderId === reminderId);
-            return { ...r, currentOccurrence: updatedOcc };
-          }
-          return r;
-        });
-
-        set({ reminders: updatedReminders, occurrences: updatedOccs });
-
-        const occToSave = updatedOccs.find(o => o.reminderId === reminderId);
-        if (occToSave) await updateOccurrenceInIDB(occToSave);
+        // 1. Local-first Repository Complete
+        await reminderRepository.completeOccurrence(reminderId, occurrenceId);
 
         if (isNativePlatform() && occurrenceId) {
           cancelNativeLocalAlarm(occurrenceId);
         }
 
-        // 2. Server Sync or Queue
-        const payload = { reminderId, occurrenceId, status: 'completed' };
+        // 2. Update UI State
+        await get().fetchReminders();
+
+        // 3. Background Sync
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch(`/api/reminders/${reminderId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-          } catch (e) {
-            await addToOfflineQueue({ type: 'COMPLETE_OCCURRENCE', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'COMPLETE_OCCURRENCE', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
       deleteReminder: async (id) => {
-        const updatedReminders = get().reminders.filter(r => r.id !== id);
-        const updatedOccs = get().occurrences.filter(o => o.reminderId !== id);
+        // 1. Local-first Repository Delete
+        await reminderRepository.delete(id);
 
-        set({ reminders: updatedReminders, occurrences: updatedOccs });
-        await deleteReminderFromIDB(id);
+        // 2. Update UI State
+        await get().fetchReminders();
 
-        const payload = { id };
+        // 3. Background Sync
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
-          } catch (e) {
-            await addToOfflineQueue({ type: 'DELETE_REMINDER', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'DELETE_REMINDER', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
@@ -630,50 +248,33 @@ export const useReminderStore = create<ReminderStoreState>()(
         const occ = target.currentOccurrence;
         const isCurrentlyCompleted = occ?.status === 'completed' || occ?.status === 'dismissed';
 
-        // If reminder is completed and user toggles it back ON, reactivate it with a new scheduled occurrence
         if (!target.isActive || isCurrentlyCompleted) {
           await get().reactivateReminder(id);
           return;
         }
 
-        // Toggle OFF (Deactivate)
-        const newActiveState = false;
-        const updatedReminders = get().reminders.map(r => 
-          r.id === id ? { ...r, isActive: newActiveState } : r
-        );
+        await reminderRepository.update(id, { isActive: false });
+        await get().fetchReminders();
 
-        set({ reminders: updatedReminders });
-        await updateSingleReminderInIDB({ ...target, isActive: newActiveState });
-
-        const payload = { id, isActive: newActiveState };
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          try {
-            await fetch(`/api/reminders/${id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-          } catch (e) {
-            await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
-          }
-        } else {
-          await addToOfflineQueue({ type: 'UPDATE_REMINDER', payload });
+          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
         }
       },
 
       triggerSync: async () => {
-        const res = await runSyncEngine();
+        await syncRepository.runSync();
         await get().fetchReminders();
-        console.log('[STORE] Manual sync completed:', res);
       }
     }),
     {
-      name: "agendarecap-reminders-v2",
+      name: "agendarecap-reminders-v3",
     }
   )
 );
 
-// Initialize sync listeners when module is loaded on client
+// Global Online Listener
 if (typeof window !== 'undefined') {
-  initSyncEngineListeners();
+  window.addEventListener('online', () => {
+    syncRepository.runSync().then(() => useReminderStore.getState().fetchReminders());
+  });
 }

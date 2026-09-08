@@ -16,6 +16,7 @@ import { MonthlyCalendarView } from "@/components/MonthlyCalendarView";
 import { logout } from "./login/actions";
 import { getAppSettings, AppSettings } from "@/app/actions/settings";
 import { useEffect } from "react";
+import ConnectivityBanner from "@/components/ConnectivityBanner";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -212,6 +213,7 @@ export default function Dashboard() {
 
   return (
     <main className="min-h-screen relative overflow-hidden bg-background">
+      <ConnectivityBanner />
       {/* Background Ornaments */}
       <div className="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-500/20 rounded-full blur-[140px] pointer-events-none" />
       <div className="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-500/20 rounded-full blur-[140px] pointer-events-none" />

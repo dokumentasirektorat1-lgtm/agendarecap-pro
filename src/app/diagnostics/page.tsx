@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, BellOff, BellRing, Trash2 } from "lucide-react";
+import { ArrowLeft, ShieldAlert, CheckCircle2, AlertTriangle, RefreshCw, Send, Terminal, Wifi, Database, Layers, Smartphone, Trash2, UserCheck, Play } from "lucide-react";
 import Link from "next/link";
 import Swal from "sweetalert2";
-import { getRemindersFromIDB, getOccurrencesFromIDB, getOfflineQueue } from "@/lib/idb";
+import { getRemindersFromIDB, getOccurrencesFromIDB, getOfflineQueueDebugInfo } from "@/lib/idb";
+import { createClient } from "@/lib/supabase/client";
+import { runSyncEngine } from "@/lib/sync-engine";
 
 export default function DiagnosticsPage() {
   const [platformInfo, setPlatformInfo] = useState<string>("");
@@ -17,13 +19,20 @@ export default function DiagnosticsPage() {
   const [isOnline, setIsOnline] = useState<boolean>(true);
   const [cacheActive, setCacheActive] = useState<boolean>(false);
   
-  // IDB Stats
+  // Auth Diagnostic
+  const [userId, setUserId] = useState<string | null>(null);
+  const [sessionActive, setSessionActive] = useState<boolean>(false);
+
+  // IDB & Queue Stats
   const [idbRemindersCount, setIdbRemindersCount] = useState<number>(0);
   const [idbOccurrencesCount, setIdbOccurrencesCount] = useState<number>(0);
-  const [idbQueueCount, setIdbQueueCount] = useState<number>(0);
+  const [queueInfo, setQueueInfo] = useState<{ total: number; pending: number; failedRetryable: number; failedFatal: number }>({
+    total: 0, pending: 0, failedRetryable: 0, failedFatal: 0
+  });
 
   const [isTestingPush, setIsTestingPush] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const runDiagnosticCheck = async () => {
     setIsRefreshing(true);
@@ -31,6 +40,22 @@ export default function DiagnosticsPage() {
 
     setPlatformInfo(`${navigator.platform} - ${navigator.userAgent.substring(0, 60)}...`);
     setIsOnline(navigator.onLine);
+
+    // 0. Auth Session Check
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setSessionActive(true);
+        setUserId(user.id);
+      } else {
+        setSessionActive(false);
+        setUserId(null);
+      }
+    } catch (e) {
+      setSessionActive(false);
+      setUserId(null);
+    }
 
     // 1. Notification Permission Check
     if ('Notification' in window) {
@@ -44,7 +69,6 @@ export default function DiagnosticsPage() {
         setSwActive(true);
         setSwScope(reg.scope);
 
-        // 3. Web Push Subscription Check
         const sub = await reg.pushManager.getSubscription();
         if (sub) {
           setSubscriptionActive(true);
@@ -61,7 +85,7 @@ export default function DiagnosticsPage() {
       }
     }
 
-    // 4. Cache Version Check
+    // 3. Cache Version Check
     if ('caches' in window) {
       try {
         const hasV4 = await caches.has('agendaku-pwa-v4');
@@ -71,14 +95,19 @@ export default function DiagnosticsPage() {
       }
     }
 
-    // 5. IndexedDB Stats
+    // 4. IndexedDB & Queue Stats
     try {
       const rems = await getRemindersFromIDB();
       const occs = await getOccurrencesFromIDB();
-      const queue = await getOfflineQueue();
+      const qInfo = await getOfflineQueueDebugInfo();
       setIdbRemindersCount(rems.length);
       setIdbOccurrencesCount(occs.length);
-      setIdbQueueCount(queue.length);
+      setQueueInfo({
+        total: qInfo.total,
+        pending: qInfo.pending,
+        failedRetryable: qInfo.failedRetryable,
+        failedFatal: qInfo.failedFatal
+      });
     } catch (e) {
       console.warn('IDB diagnostic read notice:', e);
     }
@@ -100,6 +129,23 @@ export default function DiagnosticsPage() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  const handleManualSync = async () => {
+    setIsSyncing(true);
+    try {
+      const res = await runSyncEngine();
+      await runDiagnosticCheck();
+      Swal.fire({
+        icon: res.success ? 'success' : 'warning',
+        title: res.success ? 'Sync Engine Selesai' : 'Sync Selesai dengan Catatan',
+        text: `Berhasil sync ${res.syncedCount} item.` + (res.errors.length > 0 ? ` Error: ${res.errors[0]}` : '')
+      });
+    } catch (e: any) {
+      Swal.fire({ icon: 'error', title: 'Sync Gagal', text: e.message });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const requestNotificationPermission = async () => {
     if (!('Notification' in window)) {
@@ -154,7 +200,6 @@ export default function DiagnosticsPage() {
         setSubscriptionActive(true);
         setEndpointSnippet(sub.endpoint.substring(0, 45) + '...');
 
-        // Register to backend DB
         const res = await fetch('/api/push/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -264,20 +309,30 @@ export default function DiagnosticsPage() {
             <div>
               <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
                 <Terminal className="w-6 h-6 text-amber-400" />
-                System & Android Push Diagnostics
+                System & Sync Diagnostics
               </h1>
-              <p className="text-xs sm:text-sm text-zinc-400 font-medium">Internal Health Checker for Push & Offline Engine</p>
+              <p className="text-xs sm:text-sm text-zinc-400 font-medium">Phase 3.2 Auth Session, Offline Queue & Sync Health</p>
             </div>
           </div>
 
-          <button
-            onClick={runDiagnosticCheck}
-            disabled={isRefreshing}
-            className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
-          >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Refresh Check</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleManualSync}
+              disabled={isSyncing}
+              className="p-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-bold"
+            >
+              <Play className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Trigger Sync</span>
+            </button>
+            <button
+              onClick={runDiagnosticCheck}
+              disabled={isRefreshing}
+              className="p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl transition-all text-amber-300 flex items-center gap-2 text-xs font-bold"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </header>
 
         {/* Hero Test Push Action Card */}
@@ -305,6 +360,22 @@ export default function DiagnosticsPage() {
         {/* Diagnostic Status Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           
+          {/* Card 0: Supabase Auth Session */}
+          <div className="glass p-5 rounded-[1.8rem] border border-purple-500/30 flex flex-col gap-3">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
+              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+                <UserCheck className="w-4 h-4 text-purple-400" /> Supabase Auth Session
+              </span>
+              <span className={`text-xs font-bold ${sessionActive ? 'text-emerald-400' : 'text-red-400'}`}>
+                {sessionActive ? 'AUTHENTICATED' : 'NO SESSION'}
+              </span>
+            </div>
+            <div className="flex flex-col gap-1 text-xs p-3 bg-black/40 rounded-xl border border-white/5">
+              <span className="text-zinc-400 font-bold">User ID:</span>
+              <span className="font-mono text-[11px] text-purple-300 break-all">{userId || 'Null (Unauthenticated)'}</span>
+            </div>
+          </div>
+
           {/* Card 1: Platform & Device */}
           <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
             <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
@@ -336,30 +407,27 @@ export default function DiagnosticsPage() {
             </div>
           </div>
 
-          {/* Card 3: Notification Permission */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
+          {/* Card 3: Offline Queue Status */}
+          <div className="glass p-5 rounded-[1.8rem] border border-amber-500/30 flex flex-col gap-3">
             <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
               <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <ShieldAlert className="w-4 h-4 text-purple-400" /> Notification Permission
+                <Database className="w-4 h-4 text-amber-400" /> Offline Sync Queue
               </span>
-              <span className={`text-xs font-bold ${permission === 'granted' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {permission.toUpperCase()}
-              </span>
+              <span className="text-xs font-bold text-amber-300">TOTAL: {queueInfo.total}</span>
             </div>
-            <div className="flex items-center justify-between text-xs p-3 bg-black/40 rounded-xl border border-white/5">
-              <span className="text-zinc-400">OS / Browser State:</span>
-              {permission === 'granted' ? (
-                <span className="text-emerald-400 font-bold flex items-center gap-1">
-                  <CheckCircle2 className="w-4 h-4" /> GRANTED
-                </span>
-              ) : (
-                <button
-                  onClick={requestNotificationPermission}
-                  className="px-3 py-1 bg-amber-500/20 text-amber-300 rounded-lg font-bold hover:bg-amber-500/30 transition-all text-[11px]"
-                >
-                  Minta Izin
-                </button>
-              )}
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="p-2 bg-black/40 rounded-lg border border-white/5">
+                <div className="text-[10px] text-zinc-500">Pending:</div>
+                <div className="font-bold text-emerald-400 text-sm">{queueInfo.pending}</div>
+              </div>
+              <div className="p-2 bg-black/40 rounded-lg border border-white/5">
+                <div className="text-[10px] text-zinc-500">Retryable:</div>
+                <div className="font-bold text-amber-400 text-sm">{queueInfo.failedRetryable}</div>
+              </div>
+              <div className="p-2 bg-black/40 rounded-lg border border-white/5">
+                <div className="text-[10px] text-zinc-500">Fatal:</div>
+                <div className="font-bold text-red-400 text-sm">{queueInfo.failedFatal}</div>
+              </div>
             </div>
           </div>
 
@@ -379,64 +447,15 @@ export default function DiagnosticsPage() {
             </div>
           </div>
 
-          {/* Card 5: Push Subscription State */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Send className="w-4 h-4 text-blue-400" /> Push Subscription State
-              </span>
-              <span className={`text-xs font-bold ${subscriptionActive ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {subscriptionActive ? 'ACTIVE' : 'INACTIVE'}
-              </span>
-            </div>
-            <div className="text-[11px] font-mono text-zinc-400 bg-black/40 p-3 rounded-xl border border-white/5 truncate">
-              {endpointSnippet || 'No active Web Push endpoint registered'}
-            </div>
-          </div>
-
-          {/* Card 6: Backend Subscription Sync */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Database className="w-4 h-4 text-emerald-400" /> Backend Database Sync
-              </span>
-              <span className={`text-xs font-bold ${backendSynced ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {backendSynced ? 'SYNCED' : 'NOT SYNCED'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs p-3 bg-black/40 rounded-xl border border-white/5">
-              <span className="text-zinc-400">push_subscribers Table:</span>
-              <span className={`font-bold ${backendSynced ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {backendSynced ? '✓ Subscription In DB' : '✕ Not Registered In DB'}
-              </span>
-            </div>
-          </div>
-
-          {/* Card 7: Offline Shell Cache */}
-          <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
-              <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-amber-400" /> Application Shell Cache
-              </span>
-              <span className={`text-xs font-bold ${cacheActive ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {cacheActive ? 'READY (v4)' : 'BUILDING'}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-xs p-3 bg-black/40 rounded-xl border border-white/5">
-              <span className="text-zinc-400">Cache Version:</span>
-              <span className="font-mono text-[11px] text-zinc-300">agendaku-pwa-v4</span>
-            </div>
-          </div>
-
-          {/* Card 8: IndexedDB Local Database */}
+          {/* Card 5: IndexedDB Local Database */}
           <div className="glass p-5 rounded-[1.8rem] border border-white/10 flex flex-col gap-3">
             <div className="flex items-center justify-between border-b border-white/10 pb-2.5">
               <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Database className="w-4 h-4 text-purple-400" /> IndexedDB Local Database
               </span>
-              <span className="text-xs font-bold text-purple-300">READY (v2)</span>
+              <span className="text-xs font-bold text-purple-300">READY (v3)</span>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="grid grid-cols-2 gap-2 text-center text-xs">
               <div className="p-2 bg-black/40 rounded-lg border border-white/5">
                 <div className="text-[10px] text-zinc-500">Reminders:</div>
                 <div className="font-bold text-white text-sm">{idbRemindersCount}</div>
@@ -444,10 +463,6 @@ export default function DiagnosticsPage() {
               <div className="p-2 bg-black/40 rounded-lg border border-white/5">
                 <div className="text-[10px] text-zinc-500">Occurrences:</div>
                 <div className="font-bold text-emerald-400 text-sm">{idbOccurrencesCount}</div>
-              </div>
-              <div className="p-2 bg-black/40 rounded-lg border border-white/5">
-                <div className="text-[10px] text-zinc-500">Queue:</div>
-                <div className="font-bold text-amber-400 text-sm">{idbQueueCount}</div>
               </div>
             </div>
           </div>

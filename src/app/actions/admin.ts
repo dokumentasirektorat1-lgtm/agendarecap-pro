@@ -1,15 +1,13 @@
-"use server"
-
 import { createClient } from '@supabase/supabase-js'
-import { createClient as createServerClient } from "@/lib/supabase/server";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
 
 // We need a service role client to bypass RLS and manage users
 function getAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   
-  if (!supabaseUrl || !supabaseServiceKey) {
-    throw new Error("Missing Supabase env vars for Service Role")
+  if (!supabaseUrl) {
+    throw new Error("Missing Supabase env vars")
   }
 
   return createClient(supabaseUrl, supabaseServiceKey, {
@@ -23,7 +21,7 @@ function getAdminClient() {
 // Verify if the caller is an admin using Service Role to bypass any RLS issues
 async function checkIsAdmin(): Promise<{ isAdmin: boolean, reason?: string }> {
   try {
-    const supabase = await createServerClient();
+    const supabase = createBrowserClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     
     if (authError || !user) {
