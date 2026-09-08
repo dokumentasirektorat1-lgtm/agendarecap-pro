@@ -6,22 +6,31 @@ export async function login(formData: FormData) {
 
   const supabase = createClient()
 
+  console.log('[AUTH] Logging in with email:', email)
+
   const { error } = await supabase.auth.signInWithPassword({
     email,
     password,
   })
 
   if (error) {
+    console.error('[AUTH] signInWithPassword error:', error.message)
     return error.message
   }
-  
-  const { data: { user } } = await supabase.auth.getUser()
-  if (user) {
-    const { data: profile } = await supabase.from('profiles').select('status').eq('id', user.id).single()
-    if (profile?.status === 'pending') {
-      if (typeof window !== 'undefined') window.location.href = "/waiting-approval"
-      return null
-    }
+
+  // Verify session is active in browser storage
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session) {
+    console.error('[AUTH] Sesi tidak ditemukan setelah login')
+    return "Sesi otentikasi tidak ditemukan. Silakan coba lagi."
+  }
+
+  console.log('[AUTH] Session confirmed for user:', session.user.id)
+
+  const { data: profile } = await supabase.from('profiles').select('status').eq('id', session.user.id).single()
+  if (profile?.status === 'pending') {
+    if (typeof window !== 'undefined') window.location.href = "/waiting-approval"
+    return null
   }
 
   if (typeof window !== 'undefined') window.location.href = "/"
