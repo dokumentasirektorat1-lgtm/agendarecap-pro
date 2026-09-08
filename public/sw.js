@@ -39,13 +39,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// 3. Fetch Event - Stale-While-Revalidate Strategy for Application Shell
+// 3. Fetch Event - Stale-While-Revalidate Strategy with Safe Navigation Fallback
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Skip API routes and browser extensions from HTTP caching
-  if (url.pathname.startsWith('/api/') || url.protocol === 'chrome-extension:') return;
+  // Skip API routes, webpack-hmr, and browser extensions from HTTP caching
+  if (
+    url.pathname.startsWith('/api/') || 
+    url.pathname.startsWith('/_next/webpack-hmr') ||
+    url.protocol === 'chrome-extension:'
+  ) return;
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
@@ -60,7 +64,12 @@ self.addEventListener('fetch', (event) => {
           return networkResponse;
         })
         .catch(() => {
-          return cachedResponse || caches.match('/');
+          if (cachedResponse) return cachedResponse;
+          // ONLY fall back to HTML shell for page navigation requests
+          if (event.request.mode === 'navigate') {
+            return caches.match('/');
+          }
+          return Response.error();
         });
 
       return cachedResponse || fetchPromise;

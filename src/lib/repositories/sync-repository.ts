@@ -22,6 +22,22 @@ import {
   sanitizeOccurrenceForSupabase 
 } from "@/lib/repositories/sanitizer";
 
+export function serializeSupabaseError(error: unknown) {
+  if (!error) return null;
+  if (typeof error === 'object') {
+    const e = error as Record<string, unknown>;
+    return {
+      message: e.message || String(error),
+      code: e.code || 'UNKNOWN',
+      details: e.details || null,
+      hint: e.hint || null,
+      name: e.name || 'SupabaseError',
+      stringified: JSON.stringify(error),
+    };
+  }
+  return { message: String(error) };
+}
+
 let activeSyncPromise: Promise<{ success: boolean; syncedCount: number; errors: string[] }> | null = null;
 
 /**
@@ -359,14 +375,42 @@ export class SyncRepository {
           .eq('user_id', user.id)
           .order('created_at', { ascending: false });
 
-        const { data: remoteOccurrences, error: occFetchError } = await supabase
-          .from('reminder_occurrences')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('scheduled_at', { ascending: true });
+        if (reminderFetchError) {
+          const sErr = serializeSupabaseError(reminderFetchError);
+          console.error('[SYNC REMINDERS ERROR]', sErr);
+        }
 
-        if (reminderFetchError) console.error('[SYNC ENGINE] Fetch remote reminders error:', reminderFetchError);
-        if (occFetchError) console.error('[SYNC ENGINE] Fetch remote occurrences error:', occFetchError);
+        console.log('[SYNC OCCURRENCES AUTH]', {
+          hasUser: !!user,
+          userId: user?.id,
+        });
+
+        let remoteOccurrences: any[] = [];
+        let occFetchError: any = null;
+
+        if (remoteReminders && Array.isArray(remoteReminders) && remoteReminders.length > 0) {
+          const reminderIds = remoteReminders.map((r: any) => r.id);
+          const res = await supabase
+            .from('reminder_occurrences')
+            .select('*')
+            .in('reminder_id', reminderIds)
+            .order('scheduled_at', { ascending: true });
+
+          remoteOccurrences = res.data || [];
+          occFetchError = res.error;
+        }
+
+        if (occFetchError) {
+          const sErr = serializeSupabaseError(occFetchError);
+          console.error('[SYNC OCCURRENCES ERROR]', {
+            message: occFetchError?.message,
+            code: occFetchError?.code,
+            details: occFetchError?.details,
+            hint: occFetchError?.hint,
+            raw: String(occFetchError),
+            json: JSON.stringify(sErr),
+          });
+        }
 
         if (remoteReminders && Array.isArray(remoteReminders)) {
           const localReminders = await getRemindersFromIDB();

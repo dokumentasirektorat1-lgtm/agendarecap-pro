@@ -32,6 +32,15 @@ export default function ServiceWorkerRegistration() {
     // 4. Service Worker Registration (Web Push & Offline Fallback)
     if (!('serviceWorker' in navigator)) return;
 
+    if (process.env.NODE_ENV === 'development') {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const registration of registrations) {
+          registration.unregister();
+        }
+      });
+      return;
+    }
+
     const registerSW = async () => {
       try {
         const swUrl = new URL('/sw.js', window.location.origin).href;

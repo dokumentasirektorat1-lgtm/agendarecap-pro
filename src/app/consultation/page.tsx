@@ -30,13 +30,15 @@ export default function ConsultationPage() {
     fetchAgendas();
   }, [fetchAgendas]);
 
-  // Filter agendas that need consultation
+  // Filter agendas that need consultation (pending_consultation, rescheduled, or unscheduled)
   const consultationAgendas = agendas.filter(
-    (a) => (a.status === 'pending_consultation' || a.status === 'rescheduled') && !a.is_completed
+    (a) => (a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed
   ).sort((a, b) => {
     if (a.isUrgent && !b.isUrgent) return -1;
     if (!a.isUrgent && b.isUrgent) return 1;
-    return new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime();
+    const timeA = a.scheduled_at ? new Date(a.scheduled_at).getTime() : 0;
+    const timeB = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
+    return timeA - timeB;
   });
 
   // Debounced save for private notes
@@ -201,10 +203,10 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
   );
 
   // Auto-collapse future items (anything starting tomorrow), unless user marks it as urgent
-  const agendaDate = new Date(agenda.scheduled_at);
+  const agendaDate = agenda.scheduled_at ? new Date(agenda.scheduled_at) : new Date(0);
   const now = new Date();
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-  const isFuture = agendaDate.getTime() > endOfToday.getTime();
+  const isFuture = agenda.scheduled_at ? agendaDate.getTime() > endOfToday.getTime() : false;
   
   const [isExpanded, setIsExpanded] = useState(agenda.isUrgent ? true : !isFuture);
 
@@ -223,7 +225,7 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
         className="glass px-5 py-3 rounded-2xl border border-white/5 flex justify-between items-center relative overflow-hidden cursor-pointer hover:bg-white/10 hover:border-white/20 transition-all shadow-md group"
         onClick={() => setIsExpanded(true)}
       >
-        <div className={`absolute left-0 top-0 bottom-0 w-1 ${agenda.status === 'rescheduled' ? 'bg-blue-500' : 'bg-orange-500'}`} />
+        <div className={`absolute left-0 top-0 bottom-0 w-1 ${agenda.status === 'rescheduled' ? 'bg-blue-500' : agenda.status === 'unscheduled' ? 'bg-purple-500' : 'bg-orange-500'}`} />
         <div className="pl-2 flex-1">
           <div className="flex items-center gap-3">
             <button 
@@ -238,6 +240,10 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
                <span className="px-2 py-0.5 rounded-full text-[9px] bg-blue-500/10 text-blue-400 font-bold uppercase tracking-wider border border-blue-500/20">
                  Rescheduled
                </span>
+            ) : agenda.status === 'unscheduled' ? (
+               <span className="px-2 py-0.5 rounded-full text-[9px] bg-purple-500/10 text-purple-400 font-bold uppercase tracking-wider border border-purple-500/20">
+                 Belum Terjadwal
+               </span>
             ) : (
                 agenda.scheduled_at && isFuture && (
                   <span className="px-2 py-0.5 rounded-full text-[9px] bg-white/10 text-zinc-400 uppercase tracking-widest border border-white/5">
@@ -248,7 +254,9 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
           </div>
           <p className="text-xs text-orange-400 mt-1 flex items-center gap-1.5 font-medium">
             <Clock className="w-3 h-3" />
-            {format(new Date(agenda.scheduled_at), 'd MMMM yyyy, HH:mm', { locale: id })}
+            {agenda.scheduled_at && agenda.status !== 'unscheduled'
+              ? format(new Date(agenda.scheduled_at), 'd MMMM yyyy, HH:mm', { locale: id })
+              : 'Belum Terjadwal'}
           </p>
         </div>
         <button className="text-xs font-semibold text-zinc-400 group-hover:text-white px-4 py-2 bg-white/5 rounded-xl transition-colors">
@@ -267,7 +275,7 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
       className="glass p-5 rounded-[1.5rem] border border-orange-500/20 shadow-lg shadow-orange-500/5 flex flex-col md:flex-row gap-6 relative overflow-hidden"
     >
       {/* Decorative side border */}
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${agenda.status === 'rescheduled' ? 'bg-blue-500' : 'bg-orange-500'}`} />
+      <div className={`absolute left-0 top-0 bottom-0 w-1 ${agenda.status === 'rescheduled' ? 'bg-blue-500' : agenda.status === 'unscheduled' ? 'bg-purple-500' : 'bg-orange-500'}`} />
 
       {/* Close button to collapse manually */}
       <button 
@@ -293,6 +301,10 @@ function ConsultationCard({ agenda, onConfirm, onCancel, onDateChange, onNotesCh
           {agenda.status === 'rescheduled' ? (
              <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-400 font-bold uppercase tracking-wider border border-blue-500/20">
                Rescheduled
+             </span>
+          ) : agenda.status === 'unscheduled' ? (
+             <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-500/10 text-purple-400 font-bold uppercase tracking-wider border border-purple-500/20">
+               Belum Terjadwal
              </span>
           ) : (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-400 font-bold uppercase tracking-wider border border-orange-500/20 flex items-center gap-1">
