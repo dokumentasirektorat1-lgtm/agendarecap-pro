@@ -10,6 +10,22 @@ export default function ConnectivityBanner() {
   const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [syncErrorMsg, setSyncErrorMsg] = useState<string | null>(null);
+  const [isSupabaseReachable, setIsSupabaseReachable] = useState<boolean | null>(null);
+
+  const checkSupabaseReachability = async () => {
+    if (!isOnline) {
+      setIsSupabaseReachable(false);
+      return;
+    }
+    try {
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+      const { error } = await supabase.from('agendas').select('id', { head: true, count: 'exact' }).limit(1);
+      setIsSupabaseReachable(!error);
+    } catch {
+      setIsSupabaseReachable(false);
+    }
+  };
 
   const handleManualTriggerSync = async () => {
     if (!isOnline) return;
@@ -19,6 +35,7 @@ export default function ConnectivityBanner() {
       const res = await runSyncEngine();
       if (res.success) {
         setSyncState('success');
+        setIsSupabaseReachable(true);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
       } else {
         setSyncState('error');
@@ -31,7 +48,7 @@ export default function ConnectivityBanner() {
   };
 
   useEffect(() => {
-    // Initial sync time setup
+    checkSupabaseReachability();
     if (isOnline) {
       setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' }));
     }
@@ -41,19 +58,29 @@ export default function ConnectivityBanner() {
 
   return (
     <div className="w-full bg-[#121215]/80 backdrop-blur-md border-b border-white/5 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-3 shadow-inner">
-      {/* 1. Network Status */}
+      {/* 1. Network & Supabase Status */}
       <div className="flex items-center gap-2">
         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/10">
           {isOnline ? (
             <>
               <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="font-bold text-emerald-400">Online</span>
+              <span className="font-bold text-emerald-400">Network: Online</span>
             </>
           ) : (
             <>
               <WifiOff className="w-3.5 h-3.5 text-red-400" />
-              <span className="font-bold text-red-400">Offline (Lokal)</span>
+              <span className="font-bold text-red-400">Network: Offline</span>
             </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/5 border border-white/10">
+          {isSupabaseReachable === true ? (
+            <span className="font-bold text-emerald-400">Supabase: Connected</span>
+          ) : isSupabaseReachable === false && isOnline ? (
+            <span className="font-bold text-amber-400">Supabase: Unreachable</span>
+          ) : (
+            <span className="font-bold text-zinc-500">Supabase: Offline</span>
           )}
         </div>
 
@@ -62,10 +89,10 @@ export default function ConnectivityBanner() {
           <UserCheck className="w-3.5 h-3.5 text-purple-400" />
           {user ? (
             <span className="font-medium text-zinc-300">
-              User: <span className="font-mono text-purple-300 font-bold">{shortUserId}</span>
+              Auth: <span className="font-mono text-purple-300 font-bold">{shortUserId}</span>
             </span>
           ) : (
-            <span className="font-bold text-amber-400">Tidak Terautentikasi</span>
+            <span className="font-bold text-amber-400">Auth: Belum Login</span>
           )}
         </div>
       </div>

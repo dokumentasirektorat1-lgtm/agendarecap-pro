@@ -159,3 +159,33 @@ export function sanitizeOccurrenceForSupabase(input: any): SupabaseOccurrencePay
 
   return sanitized;
 }
+
+export function mapAgendaFromSupabase(r: any): any {
+  if (!r) return null;
+  return {
+    id: r.id,
+    user_id: r.user_id,
+    title: r.title || '',
+    location: r.location || '',
+    notes: r.notes || '',
+    scheduled_at: r.scheduled_at,
+    privateNotes: r.privateNotes || '',
+    is_completed: Boolean(r.is_completed),
+    include_notes_in_share: Boolean(r.include_notes_in_share),
+    status: r.status || 'confirmed',
+    isShareable: r.isShareable !== undefined ? Boolean(r.isShareable) : true,
+    groupId: r.groupId || undefined,
+    isOnline: Boolean(r.isOnline),
+    onlineLink: r.onlineLink || '',
+    meetingId: r.meetingId || '',
+    meetingPasscode: r.meetingPasscode || '',
+    isUrgent: Boolean(r.isUrgent),
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  };
+}
+
+export function mapAgendaToSupabase(agenda: any): SupabaseAgendaPayload {
+  return sanitizeAgendaForSupabase(agenda);
+}
+

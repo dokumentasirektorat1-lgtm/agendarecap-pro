@@ -59,9 +59,19 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
     if (typeof window === 'undefined') return;
 
     try {
+      console.log('[AUTH] initialization started');
       const supabase = createClient();
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       
+      if (currentSession) {
+        console.log('[AUTH] session found');
+        console.log('[AUTH] user found');
+        console.log(`[AUTH] user id: ${currentSession.user.id}`);
+      } else {
+        console.log('[AUTH] session missing');
+        console.log('[AUTH] user missing');
+      }
+
       setSession(currentSession);
       setUser(currentSession?.user || null);
 
@@ -71,7 +81,7 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
       setPendingQueueCount(qInfo.pending);
       setFailedQueueCount(qInfo.failedRetryable + qInfo.failedFatal);
     } catch (e: any) {
-      console.warn('[AUTH GUARD] Check session notice:', e);
+      console.warn('[AUTH] Check session notice:', e);
     } finally {
       setAuthLoading(false);
     }
@@ -87,19 +97,26 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
 
     // Subscribe to Auth State Changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: string, newSession: Session | null) => {
-      console.log(`[AUTH GUARD] Auth Event: ${event}`);
+      console.log(`[AUTH] Auth Event: ${event}`);
       setLastAuthEvent(event);
       setSession(newSession);
       setUser(newSession?.user || null);
       setAuthLoading(false);
 
       if (event === 'SIGNED_OUT') {
+        console.log('[AUTH] signed out');
+        const { useStore } = await import("@/store/useStore");
+        useStore.setState({ agendas: [], sharedDates: {} });
         if (!PUBLIC_ROUTES.includes(window.location.pathname)) {
           router.replace('/login');
         }
       } else if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') {
-        if (newSession && window.location.pathname === '/login') {
-          router.replace('/');
+        if (event === 'SIGNED_IN') console.log('[AUTH] signed in');
+        if (newSession) {
+          console.log(`[AUTH] user id: ${newSession.user.id}`);
+          if (window.location.pathname === '/login') {
+            router.replace('/');
+          }
         }
       }
     });
