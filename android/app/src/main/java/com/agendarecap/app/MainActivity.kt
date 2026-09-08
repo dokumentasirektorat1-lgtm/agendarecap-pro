@@ -1,23 +1,14 @@
 package com.agendarecap.app
 
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.webkit.RenderProcessGoneDetail
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
-import androidx.webkit.WebViewAssetLoader
 import com.getcapacitor.BridgeActivity
 import com.getcapacitor.BridgeWebViewClient
 
@@ -28,41 +19,22 @@ class MainActivity : BridgeActivity() {
         private const val PREFS_NAME = "agendarecap_lifecycle_prefs"
         private const val KEY_CRASH_COUNT = "renderer_crash_count"
         private const val KEY_LAST_CRASH_TIME = "last_crash_time_ms"
-        private const val MAX_NETWORK_RETRIES = 3
-        private const val MAIN_APP_URL = "https://agendarecap.vercel.app"
-        private const val ASSET_DOMAIN = "appassets.androidview.sandbox"
-        private const val OFFLINE_FALLBACK_URL = "https://appassets.androidview.sandbox/public/index.html"
     }
 
-    private var networkRetryCount = 0
-    private var isFallbackLoaded = false
     private val mainHandler = Handler(Looper.getMainLooper())
-    private lateinit var assetLoader: WebViewAssetLoader
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Log.d(TAG, "MainActivity created (WebViewAssetLoader Engine)")
+        Log.d(TAG, "MainActivity created (Native Local Bundle Engine)")
         registerPlugin(NativeAlarmPlugin::class.java)
 
-        // Prevent restoring stale WebView error state on cold start
-        super.onCreate(null)
-
-        // Initialize WebViewAssetLoader for safe offline asset handling over https://appassets.androidview.sandbox/
-        assetLoader = WebViewAssetLoader.Builder()
-            .setDomain(ASSET_DOMAIN)
-            .addPathHandler("/public/", WebViewAssetLoader.AssetsPathHandler(this))
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
-            .build()
+        super.onCreate(savedInstanceState)
 
         setupBackNavigation()
 
         val webView = bridge.webView
         if (webView != null) {
-            Log.d(TAG, "Configuring WebView settings with Asset Loader")
             configureWebView(webView)
         }
-
-        // Perform initial network connectivity check before loading primary URL
-        checkAndLoadInitialPage()
     }
 
     private fun configureWebView(webView: WebView) {
@@ -72,35 +44,8 @@ class MainActivity : BridgeActivity() {
         settings.databaseEnabled = true
         settings.allowFileAccess = true
         settings.allowContentAccess = true
-        settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
 
         webView.webViewClient = object : BridgeWebViewClient(this.bridge) {
-            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
-                if (request != null && request.url != null) {
-                    val interceptedResponse = assetLoader.shouldInterceptRequest(request.url)
-                    if (interceptedResponse != null) {
-                        Log.d(TAG, "AssetLoader intercepted request: ${request.url}")
-                        return interceptedResponse
-                    }
-                }
-                return super.shouldInterceptRequest(view, request)
-            }
-
-            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                super.onPageStarted(view, url, favicon)
-                Log.d(TAG, "Page started loading: $url")
-            }
-
-            override fun onPageFinished(view: WebView?, url: String?) {
-                super.onPageFinished(view, url)
-                Log.d(TAG, "Page finished loading: $url")
-                if (url != null && url.contains("agendarecap.vercel.app")) {
-                    networkRetryCount = 0
-                    isFallbackLoaded = false
-                }
-            }
-
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 Log.e(TAG, "WebView renderer process gone. Did crash: ${detail?.didCrash()}")
 
@@ -139,55 +84,7 @@ class MainActivity : BridgeActivity() {
 
                 return super.onRenderProcessGone(view, detail)
             }
-
-            override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
-                super.onReceivedError(view, request, error)
-
-                if (request != null && request.isForMainFrame) {
-                    val failingUrl = request.url?.toString() ?: ""
-                    val errorCode = error?.errorCode ?: 0
-                    val description = error?.description ?: ""
-
-                    Log.w(TAG, "Network error on main frame: code=$errorCode, desc=$description, url=$failingUrl")
-
-                    if (!isFallbackLoaded && networkRetryCount < MAX_NETWORK_RETRIES) {
-                        networkRetryCount++
-                        val delayMs = networkRetryCount * 1500L
-                        Log.i(TAG, "Retrying main app load (Attempt $networkRetryCount/$MAX_NETWORK_RETRIES) in ${delayMs}ms")
-
-                        mainHandler.postDelayed({
-                            if (view != null && isNetworkAvailable(this@MainActivity)) {
-                                view.loadUrl(MAIN_APP_URL)
-                            } else if (view != null) {
-                                loadOfflineFallback(view)
-                            }
-                        }, delayMs)
-                    } else if (!isFallbackLoaded) {
-                        Log.e(TAG, "Network retries exhausted. Displaying custom WebViewAssetLoader offline shell.")
-                        if (view != null) {
-                            loadOfflineFallback(view)
-                        }
-                    }
-                }
-            }
         }
-    }
-
-    private fun checkAndLoadInitialPage() {
-        val webView = bridge.webView ?: return
-        if (isNetworkAvailable(this)) {
-            Log.i(TAG, "Network connected. Loading production domain: $MAIN_APP_URL")
-            isFallbackLoaded = false
-            webView.loadUrl(MAIN_APP_URL)
-        } else {
-            Log.w(TAG, "Device offline. Displaying custom offline asset shell via WebViewAssetLoader.")
-            loadOfflineFallback(webView)
-        }
-    }
-
-    private fun loadOfflineFallback(webView: WebView) {
-        isFallbackLoaded = true
-        webView.loadUrl(OFFLINE_FALLBACK_URL)
     }
 
     private fun setupBackNavigation() {
@@ -204,52 +101,5 @@ class MainActivity : BridgeActivity() {
                 }
             }
         })
-    }
-
-    fun isNetworkAvailable(context: Context): Boolean {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val network = connectivityManager.activeNetwork ?: return false
-            val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-            return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                   capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-        } else {
-            @Suppress("DEPRECATION")
-            val networkInfo = connectivityManager.activeNetworkInfo
-            @Suppress("DEPRECATION")
-            return networkInfo != null && networkInfo.isConnected
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        Log.d(TAG, "Activity resumed")
-        val webView = bridge.webView
-        if (webView != null) {
-            webView.onResume()
-            webView.resumeTimers()
-
-            // If offline fallback was previously displayed and network is restored, automatically reload main app
-            if (isFallbackLoaded && isNetworkAvailable(this)) {
-                Log.i(TAG, "Network restored on activity resume. Reloading live production application.")
-                isFallbackLoaded = false
-                webView.loadUrl(MAIN_APP_URL)
-            }
-        }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        Log.d(TAG, "Activity paused")
-        val webView = bridge.webView
-        if (webView != null) {
-            webView.onPause()
-            webView.pauseTimers()
-        }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        Log.d(TAG, "Activity destroyed")
     }
 }

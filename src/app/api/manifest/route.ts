@@ -3,9 +3,13 @@ import { NextResponse } from "next/server";
 export const dynamic = 'force-static';
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const logo = searchParams.get("logo");
-  const name = searchParams.get("name") || "AgendaRecap Pro";
+  let logo: string | null = null;
+  let name = "AgendaRecap Pro";
+  try {
+    const url = new URL(request?.url || "https://agendarecap.pro");
+    logo = url.searchParams.get("logo");
+    name = url.searchParams.get("name") || name;
+  } catch (e) {}
 
   // Use the provided logo or a fallback default icon
   const iconUrl = logo || "/icon-512x512.png";

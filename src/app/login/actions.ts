@@ -1,13 +1,10 @@
-"use server"
-
-import { createClient } from "@/lib/supabase/server"
-import { redirect } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string
   const password = formData.get("password") as string
 
-  const supabase = await createClient()
+  const supabase = createClient()
 
   const { error } = await supabase.auth.signInWithPassword({
     email,
@@ -22,17 +19,19 @@ export async function login(formData: FormData) {
   if (user) {
     const { data: profile } = await supabase.from('profiles').select('status').eq('id', user.id).single()
     if (profile?.status === 'pending') {
-      redirect("/waiting-approval")
+      if (typeof window !== 'undefined') window.location.href = "/waiting-approval"
+      return null
     }
   }
 
-  redirect("/")
+  if (typeof window !== 'undefined') window.location.href = "/"
+  return null
 }
 
 export async function signup(formData: FormData) {
   const email = formData.get("email") as string
   const password = formData.get("password") as string
-  const supabase = await createClient()
+  const supabase = createClient()
 
   const { error } = await supabase.auth.signUp({
     email,
@@ -44,11 +43,12 @@ export async function signup(formData: FormData) {
   }
   
   // New users are pending by default
-  redirect("/waiting-approval")
+  if (typeof window !== 'undefined') window.location.href = "/waiting-approval"
+  return null
 }
 
 export async function logout() {
-  const supabase = await createClient()
+  const supabase = createClient()
   await supabase.auth.signOut()
-  redirect("/login")
+  if (typeof window !== 'undefined') window.location.href = "/login"
 }

@@ -2,6 +2,18 @@
 // Bridges Next.js TypeScript client with Java NativeAlarmPlugin on Android, with Web Fallbacks
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import { reminderRepository } from '@/lib/repositories/reminder-repository';
+import { syncRepository } from '@/lib/repositories/sync-repository';
+
+export interface NativePendingAction {
+  actionId: string;
+  type: 'COMPLETE' | 'SNOOZE' | 'DISMISS';
+  reminderId: string;
+  occurrenceId: string;
+  minutes?: number;
+  snoozedUntilMs?: number;
+  timestamp: number;
+}
 
 export interface NativeAlarmPluginInterface {
   schedule(options: {
@@ -28,6 +40,10 @@ export interface NativeAlarmPluginInterface {
 
   getScheduled(): Promise<{ alarms: any[] }>;
 
+  getPendingNativeActions(): Promise<{ actions: NativePendingAction[] }>;
+
+  acknowledgeNativeAction(options: { actionId: string }): Promise<{ success: boolean }>;
+
   checkPermissions(): Promise<{ notifications: string; exactAlarm: boolean }>;
 
   requestExactAlarmPermission(): Promise<{ opened: boolean; alreadyGranted?: boolean }>;
@@ -53,9 +69,63 @@ export function isNativePlatform(): boolean {
   return Capacitor.isNativePlatform() || (window as any).isAndroidNativeBridge === true || (window as any).Capacitor?.isNativePlatform?.() === true;
 }
 
+/**
+ * Imports pending native user actions (e.g. COMPLETE / SNOOZE pressed from Android notifications while app was closed)
+ * into local IndexedDB repository and triggers offline queue sync.
+ */
+export async function syncNativeActionsToIndexedDB(): Promise<number> {
+  if (!isNativePlatform()) return 0;
+
+  try {
+    const { actions } = await NativeAlarm.getPendingNativeActions();
+    if (!actions || actions.length === 0) return 0;
+
+    console.log(`[NATIVE ALARM SYNC] Found ${actions.length} pending native notification user actions.`);
+    let processed = 0;
+
+    for (const action of actions) {
+      try {
+        if (action.type === 'COMPLETE') {
+          await reminderRepository.completeOccurrence(action.reminderId, action.occurrenceId);
+        } else if (action.type === 'SNOOZE') {
+          await reminderRepository.snoozeOccurrence(action.reminderId, action.occurrenceId, action.minutes || 5);
+        }
+
+        // Acknowledge after safe import into IndexedDB & offline queue
+        await NativeAlarm.acknowledgeNativeAction({ actionId: action.actionId });
+        processed++;
+        console.log(`[NATIVE ALARM SYNC] Processed & acknowledged native action: ${action.actionId}`);
+      } catch (actionErr) {
+        console.error(`[NATIVE ALARM SYNC] Failed to import action ${action.actionId}:`, actionErr);
+      }
+    }
+
+    if (processed > 0 && typeof navigator !== 'undefined' && navigator.onLine) {
+      syncRepository.runSync().catch(err => console.warn('[NATIVE ALARM SYNC] Sync notice:', err));
+    }
+
+    return processed;
+  } catch (err) {
+    console.warn('[NATIVE ALARM SYNC] syncNativeActionsToIndexedDB notice:', err);
+    return 0;
+  }
+}
+
 export function initNativeAlarmListeners(): void {
   if (isNativePlatform()) {
     console.log('[NATIVE ALARM] Native Android Alarm Engine initialized.');
+    syncNativeActionsToIndexedDB();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', () => {
+        syncNativeActionsToIndexedDB();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          syncNativeActionsToIndexedDB();
+        }
+      });
+    }
   }
 }
 
@@ -207,4 +277,3 @@ export async function stopNativeAudioPreview(): Promise<boolean> {
   }
   return false;
 }
-

@@ -5,7 +5,6 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.media.MediaPlayer;
-import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.Settings;
@@ -238,6 +237,45 @@ public class NativeAlarmPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getPendingNativeActions(PluginCall call) {
+        Context context = getContext();
+        Map<String, ?> actionsMap = NativeActionStorage.getAllActions(context);
+
+        JSArray list = new JSArray();
+        if (actionsMap != null) {
+            for (Map.Entry<String, ?> entry : actionsMap.entrySet()) {
+                try {
+                    String jsonStr = (String) entry.getValue();
+                    if (jsonStr != null) {
+                        list.put(new JSObject(jsonStr));
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        JSObject ret = new JSObject();
+        ret.put("actions", list);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void acknowledgeNativeAction(PluginCall call) {
+        String actionId = call.getString("actionId");
+        if (actionId == null) {
+            call.reject("Must provide actionId");
+            return;
+        }
+
+        Context context = getContext();
+        NativeActionStorage.removeAction(context, actionId);
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        ret.put("actionId", actionId);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
     public void checkPermissions(PluginCall call) {
         Context context = getContext();
         boolean notificationsGranted = NotificationManagerCompat.from(context).areNotificationsEnabled();
@@ -323,4 +361,3 @@ public class NativeAlarmPlugin extends Plugin {
         }
     }
 }
-

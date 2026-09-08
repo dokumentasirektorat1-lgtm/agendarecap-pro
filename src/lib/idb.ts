@@ -1,8 +1,30 @@
-// IndexedDB Helper v2 for Agendaku PWA & Service Worker
-// Stores: 'reminders', 'occurrences', 'offline_queue', 'app_state'
+// IndexedDB Helper v3 for Agendaku PWA, Native Capacitor & Service Worker
+// Stores: 'agendas', 'reminders', 'occurrences', 'offline_queue', 'app_state'
 
 const DB_NAME = 'agendaku_pwa_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
+
+export interface IDBAgenda {
+  id: string;
+  user_id?: string;
+  title: string;
+  location: string;
+  notes?: string;
+  scheduled_at: string;
+  privateNotes?: string;
+  is_completed: boolean;
+  include_notes_in_share: boolean;
+  status: 'confirmed' | 'pending_consultation' | 'rescheduled' | 'cancelled' | 'unscheduled';
+  isShareable: boolean;
+  groupId?: string;
+  isOnline?: boolean;
+  onlineLink?: string;
+  meetingId?: string;
+  meetingPasscode?: string;
+  isUrgent?: boolean;
+  created_at?: string;
+  updated_at: string;
+}
 
 export interface IDBReminder {
   id: string;
@@ -37,9 +59,17 @@ export interface IDBOccurrence {
 
 export interface IDBOfflineQueueItem {
   id: string;
-  type: 'CREATE_REMINDER' | 'UPDATE_REMINDER' | 'DELETE_REMINDER' | 'SNOOZE_OCCURRENCE' | 'COMPLETE_OCCURRENCE' | 'DISMISS_OCCURRENCE';
+  entity_type: 'agenda' | 'reminder' | 'occurrence';
+  entity_id: string;
+  operation: 'CREATE' | 'UPDATE' | 'DELETE' | 'SNOOZE' | 'COMPLETE' | 'DISMISS';
   payload: any;
-  createdAt: number;
+  created_at: number;
+  retry_count: number;
+  status: 'PENDING' | 'SYNCING' | 'FAILED_RETRYABLE' | 'FAILED_FATAL';
+  error_message?: string;
+  // Legacy compatibility fields
+  type?: string;
+  createdAt?: number;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -52,6 +82,12 @@ function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event: any) => {
       const db = event.target.result as IDBDatabase;
+
+      if (!db.objectStoreNames.contains('agendas')) {
+        const agendaStore = db.createObjectStore('agendas', { keyPath: 'id' });
+        agendaStore.createIndex('scheduled_at', 'scheduled_at', { unique: false });
+        agendaStore.createIndex('user_id', 'user_id', { unique: false });
+      }
 
       if (!db.objectStoreNames.contains('reminders')) {
         db.createObjectStore('reminders', { keyPath: 'id' });
@@ -84,11 +120,79 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 // ==========================================
-// REMINDERS OPERATIONAL API (MERGE/UPSERT STRATEGY)
+// AGENDAS OPERATIONAL API
+// ==========================================
+
+export async function saveAgendasToIDB(agendas: IDBAgenda[]): Promise<void> {
+  if (!agendas || agendas.length === 0) return;
+  try {
+    const db = await openDB();
+    const tx = db.transaction('agendas', 'readwrite');
+    const store = tx.objectStore('agendas');
+    for (const item of agendas) {
+      store.put(item);
+    }
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('[IDB] saveAgendasToIDB error:', e);
+  }
+}
+
+export async function getAgendasFromIDB(): Promise<IDBAgenda[]> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('agendas', 'readonly');
+    const store = tx.objectStore('agendas');
+    const request = store.getAll();
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (e) {
+    console.error('[IDB] getAgendasFromIDB error:', e);
+    return [];
+  }
+}
+
+export async function updateSingleAgendaInIDB(agenda: IDBAgenda): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('agendas', 'readwrite');
+    const store = tx.objectStore('agendas');
+    store.put(agenda);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('[IDB] updateSingleAgendaInIDB error:', e);
+  }
+}
+
+export async function deleteAgendaFromIDB(id: string): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('agendas', 'readwrite');
+    const store = tx.objectStore('agendas');
+    store.delete(id);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('[IDB] deleteAgendaFromIDB error:', e);
+  }
+}
+
+// ==========================================
+// REMINDERS OPERATIONAL API
 // ==========================================
 
 export async function saveRemindersToIDB(reminders: IDBReminder[]): Promise<void> {
-  if (!reminders || reminders.length === 0) return; // Never wipe local IDB if server returns []
+  if (!reminders || reminders.length === 0) return;
   try {
     const db = await openDB();
     const tx = db.transaction('reminders', 'readwrite');
@@ -139,16 +243,21 @@ export async function updateSingleReminderInIDB(reminder: IDBReminder): Promise<
 export async function deleteReminderFromIDB(id: string): Promise<void> {
   try {
     const db = await openDB();
-    const tx = db.transaction(['reminders', 'occurrences'], 'readwrite');
-    tx.objectStore('reminders').delete(id);
-    
-    // Also delete occurrences of this reminder
-    const occStore = tx.objectStore('occurrences');
-    const index = occStore.index('reminderId');
-    const req = index.getAllKeys(id);
-    req.onsuccess = () => {
-      const keys = req.result;
-      keys.forEach(k => occStore.delete(k));
+    const tx = db.transaction('reminders', 'readwrite');
+    const storeReminders = tx.objectStore('reminders');
+    const storeOccurrences = tx.objectStore('occurrences');
+
+    storeReminders.delete(id);
+
+    // Delete associated occurrences
+    const request = storeOccurrences.getAll();
+    request.onsuccess = () => {
+      const occs = request.result as IDBOccurrence[];
+      for (const occ of occs) {
+        if (occ.reminderId === id) {
+          storeOccurrences.delete(occ.id);
+        }
+      }
     };
 
     return new Promise((resolve, reject) => {
@@ -217,16 +326,25 @@ export async function updateOccurrenceInIDB(occ: IDBOccurrence): Promise<void> {
 // OFFLINE QUEUE OPERATIONAL API
 // ==========================================
 
-export async function addToOfflineQueue(item: Omit<IDBOfflineQueueItem, 'id' | 'createdAt'>): Promise<void> {
+export async function addToOfflineQueue(item: Omit<IDBOfflineQueueItem, 'id' | 'created_at'> & { id?: string }): Promise<void> {
   try {
     const db = await openDB();
     const tx = db.transaction('offline_queue', 'readwrite');
     const store = tx.objectStore('offline_queue');
+
+    const id = item.id || crypto.randomUUID();
+    const now = Date.now();
+
     const fullItem: IDBOfflineQueueItem = {
       ...item,
-      id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      createdAt: Date.now(),
+      id,
+      created_at: now,
+      retry_count: item.retry_count || 0,
+      status: item.status || 'PENDING',
+      type: item.type,
+      createdAt: item.createdAt || now
     };
+
     store.put(fullItem);
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => resolve();
@@ -250,6 +368,21 @@ export async function getOfflineQueue(): Promise<IDBOfflineQueueItem[]> {
   } catch (e) {
     console.error('[IDB] getOfflineQueue error:', e);
     return [];
+  }
+}
+
+export async function updateQueueItemInIDB(item: IDBOfflineQueueItem): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction('offline_queue', 'readwrite');
+    const store = tx.objectStore('offline_queue');
+    store.put(item);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (e) {
+    console.error('[IDB] updateQueueItemInIDB error:', e);
   }
 }
 
@@ -281,4 +414,152 @@ export async function clearOfflineQueue(): Promise<void> {
   } catch (e) {
     console.error('[IDB] clearOfflineQueue error:', e);
   }
+}
+
+// ==========================================
+// ORPHAN DATA & QUEUE REPAIR API
+// ==========================================
+
+export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
+  repairedAgendas: number;
+  repairedReminders: number;
+  repairedOccurrences: number;
+  repairedQueue: number;
+}> {
+  let repairedAgendas = 0;
+  let repairedReminders = 0;
+  let repairedOccurrences = 0;
+  let repairedQueue = 0;
+
+  try {
+    const db = await openDB();
+    const tx = db.transaction(['agendas', 'reminders', 'occurrences', 'offline_queue'], 'readwrite');
+
+    // 1. Repair Agendas
+    const agendaStore = tx.objectStore('agendas');
+    const agendasReq = agendaStore.getAll();
+    await new Promise<void>((res) => {
+      agendasReq.onsuccess = () => {
+        const items = (agendasReq.result || []) as IDBAgenda[];
+        for (const item of items) {
+          if (!item.user_id || item.user_id === 'undefined') {
+            item.user_id = userId;
+            agendaStore.put(item);
+            repairedAgendas++;
+          }
+        }
+        res();
+      };
+    });
+
+    // 2. Repair Reminders
+    const reminderStore = tx.objectStore('reminders');
+    const remindersReq = reminderStore.getAll();
+    await new Promise<void>((res) => {
+      remindersReq.onsuccess = () => {
+        const items = (remindersReq.result || []) as IDBReminder[];
+        for (const item of items) {
+          if (!item.user_id || item.user_id === 'undefined') {
+            item.user_id = userId;
+            reminderStore.put(item);
+            repairedReminders++;
+          }
+        }
+        res();
+      };
+    });
+
+    // 3. Repair Occurrences
+    const occStore = tx.objectStore('occurrences');
+    const occReq = occStore.getAll();
+    await new Promise<void>((res) => {
+      occReq.onsuccess = () => {
+        const items = (occReq.result || []) as IDBOccurrence[];
+        for (const item of items) {
+          if (!item.user_id || item.user_id === 'undefined') {
+            item.user_id = userId;
+            occStore.put(item);
+            repairedOccurrences++;
+          }
+        }
+        res();
+      };
+    });
+
+    // 4. Repair Offline Queue items & reset FAILED_RETRYABLE status
+    const queueStore = tx.objectStore('offline_queue');
+    const queueReq = queueStore.getAll();
+    await new Promise<void>((res) => {
+      queueReq.onsuccess = () => {
+        const items = (queueReq.result || []) as IDBOfflineQueueItem[];
+        for (const item of items) {
+          let updated = false;
+
+          if (item.payload) {
+            if (!item.payload.user_id || item.payload.user_id === 'undefined') {
+              item.payload.user_id = userId;
+              updated = true;
+            }
+            if (item.payload.reminder && (!item.payload.reminder.user_id || item.payload.reminder.user_id === 'undefined')) {
+              item.payload.reminder.user_id = userId;
+              updated = true;
+            }
+            if (item.payload.occurrence && (!item.payload.occurrence.user_id || item.payload.occurrence.user_id === 'undefined')) {
+              item.payload.occurrence.user_id = userId;
+              updated = true;
+            }
+          }
+
+          if (item.status === 'FAILED_RETRYABLE' || item.status === 'FAILED_FATAL') {
+            item.status = 'PENDING';
+            item.retry_count = 0;
+            item.error_message = undefined;
+            updated = true;
+          }
+
+          if (updated) {
+            queueStore.put(item);
+            repairedQueue++;
+          }
+        }
+        res();
+      };
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+
+    if (repairedAgendas > 0 || repairedReminders > 0 || repairedQueue > 0) {
+      console.log(`[IDB REPAIR] Successfully repaired orphan data: agendas=${repairedAgendas}, reminders=${repairedReminders}, queue=${repairedQueue}`);
+    }
+  } catch (e) {
+    console.error('[IDB] repairOrphanDataAndQueueInIDB error:', e);
+  }
+
+  return { repairedAgendas, repairedReminders, repairedOccurrences, repairedQueue };
+}
+
+export async function getOfflineQueueDebugInfo(): Promise<{
+  total: number;
+  agendas: number;
+  reminders: number;
+  occurrences: number;
+  pending: number;
+  syncing: number;
+  failedRetryable: number;
+  failedFatal: number;
+}> {
+  const queue = await getOfflineQueue();
+  return {
+    total: queue.length,
+    agendas: queue.filter((i) => i.entity_type === 'agenda').length,
+    reminders: queue.filter((i) => i.entity_type === 'reminder').length,
+    occurrences: queue.filter((i) => i.entity_type === 'occurrence').length,
+    pending: queue.filter((i) => i.status === 'PENDING').length,
+    syncing: queue.filter((i) => i.status === 'SYNCING').length,
+    failedRetryable: queue.filter((i) => i.status === 'FAILED_RETRYABLE').length,
+    failedFatal: queue.filter((i) => i.status === 'FAILED_FATAL').length,
+  };
 }

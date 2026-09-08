@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
+import { agendaRepository } from "@/lib/repositories/agenda-repository";
+import { syncRepository } from "@/lib/repositories/sync-repository";
 import Swal from "sweetalert2";
 
 export type Agenda = {
@@ -26,7 +28,7 @@ export type Agenda = {
 
 type StoreState = {
   agendas: Agenda[];
-  sharedDates: Record<string, string>; // Maps "YYYY-MM-DD" to ISO "last_shared_at"
+  sharedDates: Record<string, string>;
   isLoading: boolean;
   error: string | null;
   subscriptionActive: boolean;
@@ -48,84 +50,39 @@ export const useStore = create<StoreState>((set, get) => ({
 
   fetchAgendas: async () => {
     set({ isLoading: true, error: null });
-    const supabase = createClient();
-    
+
     try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      // 1. Instant local IndexedDB load (Local First)
+      const localAgendas = await agendaRepository.getLocal();
+      set({ agendas: localAgendas as Agenda[], isLoading: false });
 
-      if (authError || !user) {
-        // Fallback to fetch API route if user session check in client client is resolving
-        const res = await fetch('/api/agendas');
-        if (res.ok) {
-          const json = await res.json();
-          set({ agendas: json.agendas || [], isLoading: false, error: null });
-          return;
-        }
-        set({ error: "Gagal memverifikasi sesi login Anda.", isLoading: false });
-        return;
-      }
-
-      // Query centralized Supabase database table 'agendas'
-      const { data, error } = await supabase
-        .from("agendas")
-        .select("*")
-        .order("scheduled_at", { ascending: true });
-
-      if (error) {
-        console.error("Gagal mengambil data dari Supabase:", error);
-        set({ error: error.message, isLoading: false });
-      } else {
-        set({ agendas: data || [], isLoading: false, error: null });
+      // 2. Background Sync if online
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        await syncRepository.runSync();
+        const updatedLocal = await agendaRepository.getLocal();
+        set({ agendas: updatedLocal as Agenda[] });
       }
     } catch (e: any) {
       console.error("Fetch agendas error:", e);
-      set({ error: e.message || "Terjadi kesalahan sistem", isLoading: false });
+      set({ error: e.message || "Terjadi kesalahan membaca data lokal", isLoading: false });
     }
   },
 
   addAgenda: async (agenda) => {
-    const supabase = createClient();
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // 1. Local-first Repository Create
+      const newAgenda = await agendaRepository.create(agenda as any);
 
-      const newAgenda = {
-        ...agenda,
-        id: crypto.randomUUID(),
-        user_id: user?.id,
-        is_completed: false,
-        status: agenda.status || 'confirmed',
-        isShareable: agenda.isShareable !== undefined ? agenda.isShareable : true,
-        isOnline: agenda.isOnline || false,
-        updated_at: new Date().toISOString(),
-        created_at: new Date().toISOString()
-      };
-
-      // Optimistic update
+      // 2. Update UI State immediately
       set((state) => ({
-        agendas: [...state.agendas, newAgenda as Agenda].sort(
+        agendas: [...state.agendas.filter(a => a.id !== newAgenda.id), newAgenda as Agenda].sort(
           (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
         ),
       }));
 
-      const res = await fetch('/api/agendas', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newAgenda)
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json();
-        throw new Error(errJson.error || 'Gagal menyimpan agenda ke backend.');
-      }
-
-      const json = await res.json();
-      if (json.agenda) {
-        // Sync state with server returned object
-        set((state) => ({
-          agendas: state.agendas
-            .map(a => a.id === newAgenda.id ? json.agenda : a)
-            .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
-        }));
+      // 3. Trigger background sync if online
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        syncRepository.runSync().catch(err => console.warn("Background sync error:", err));
       }
 
       return true;
@@ -134,10 +91,8 @@ export const useStore = create<StoreState>((set, get) => ({
       Swal.fire({
         icon: 'error',
         title: 'Gagal Tambah Data',
-        text: e?.message || e?.details || 'Agenda gagal disimpan ke database. Coba lagi.'
+        text: e?.message || 'Agenda gagal disimpan ke penyimpanan lokal. Coba lagi.'
       });
-      // Revert fetch
-      get().fetchAgendas();
       return false;
     }
   },
@@ -147,102 +102,79 @@ export const useStore = create<StoreState>((set, get) => ({
     if (!currentAgenda) return;
 
     const newStatus = !currentAgenda.is_completed;
-    const updatedAt = new Date().toISOString();
 
-    // Optimistic Update
-    set((state) => ({
-      agendas: state.agendas.map((a) =>
-        a.id === id 
-          ? { ...a, is_completed: newStatus, updated_at: updatedAt } 
-          : a
-      ),
-    }));
+    // 1. Local-first Repository Update
+    const updated = await agendaRepository.update(id, { is_completed: newStatus });
 
-    try {
-      const res = await fetch(`/api/agendas/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_completed: newStatus })
-      });
-
-      if (!res.ok) {
-        throw new Error('Gagal update status di server');
-      }
-    } catch (error: any) {
-      console.error("Gagal update status:", error);
-      Swal.fire({ toast: true, position: 'top-end', icon: 'error', text: 'Gagal mengubah status', showConfirmButton: false, timer: 3000 });
-      // Revert Optimistic Update
+    if (updated) {
+      // 2. Update UI State
       set((state) => ({
         agendas: state.agendas.map((a) =>
-          a.id === id ? { ...a, is_completed: !newStatus } : a
+          a.id === id ? (updated as Agenda) : a
         ),
       }));
+
+      // 3. Trigger background sync if online
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        syncRepository.runSync().catch(err => console.warn("Background sync error:", err));
+      }
     }
   },
 
   deleteAgenda: async (id) => {
-    const previousAgendas = get().agendas;
-    
-    // Optimistic Delete
-    set((state) => ({
-      agendas: state.agendas.filter((a) => a.id !== id),
-    }));
-
     try {
-      const res = await fetch(`/api/agendas/${id}`, {
-        method: 'DELETE'
-      });
+      // 1. Local-first Repository Delete
+      await agendaRepository.delete(id);
 
-      if (!res.ok) {
-        const json = await res.json();
-        throw new Error(json.error || 'Gagal menghapus agenda dari server.');
+      // 2. Update UI State
+      set((state) => ({
+        agendas: state.agendas.filter((a) => a.id !== id),
+      }));
+
+      // 3. Trigger background sync if online
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        syncRepository.runSync().catch(err => console.warn("Background sync error:", err));
       }
+
       return true;
     } catch (error: any) {
-      console.error("Gagal menghapus:", error);
+      console.error("Gagal menghapus agenda:", error);
       Swal.fire({
         icon: 'error',
         title: 'Gagal Menghapus',
-        text: error.message
+        text: error.message || 'Gagal menghapus data dari penyimpanan lokal.'
       });
-      // Revert Optimistic Delete
-      set({ agendas: previousAgendas });
       return false;
     }
   },
 
   updateAgenda: async (id, updates) => {
-    const previousAgendas = get().agendas;
-    const updatedAt = new Date().toISOString();
-
-    // Optimistic Update
-    set((state) => ({
-      agendas: state.agendas.map((a) => 
-        (a.id === id ? { ...a, ...updates, updated_at: updatedAt } : a)
-      ),
-    }));
-
     try {
-      const res = await fetch(`/api/agendas/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
+      // 1. Local-first Repository Update
+      const updated = await agendaRepository.update(id, updates);
 
-      if (!res.ok) {
-        const json = await res.json();
-        throw new Error(json.error || 'Gagal mengupdate agenda.');
+      if (updated) {
+        // 2. Update UI State
+        set((state) => ({
+          agendas: state.agendas.map((a) => (a.id === id ? (updated as Agenda) : a)),
+        }));
+
+        // 3. Trigger background sync if online
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          syncRepository.runSync().catch(err => console.warn("Background sync error:", err));
+        }
+
+        return true;
       }
-      return true;
+
+      return false;
     } catch (error: any) {
-      console.error("Gagal mengupdate agenda:", error?.message || error);
+      console.error("Gagal mengupdate agenda:", error);
       Swal.fire({
         icon: 'error',
         title: 'Gagal Update',
-        text: error?.message || error?.details || 'Gagal update agenda.'
+        text: error?.message || 'Gagal update agenda.'
       });
-      // Revert Optimistic Update
-      set({ agendas: previousAgendas });
       return false;
     }
   },

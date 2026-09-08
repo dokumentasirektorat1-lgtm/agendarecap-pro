@@ -8,6 +8,7 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 import { downloadICSFile, generateGoogleCalendarUrl } from "@/lib/calendar-service";
+import ConnectivityBanner from "@/components/ConnectivityBanner";
 
 export default function RemindersPage() {
   const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, reactivateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
@@ -245,6 +246,7 @@ export default function RemindersPage() {
 
   return (
     <main className="min-h-screen relative bg-[#0A0A0B] text-zinc-100 pb-16">
+      <ConnectivityBanner />
       {/* Dynamic Background Glow */}
       <div className="fixed top-[-10%] right-[-10%] w-[45%] h-[45%] bg-blue-600/10 rounded-full blur-[140px] pointer-events-none" />
       <div className="fixed bottom-[-10%] left-[-10%] w-[45%] h-[45%] bg-purple-600/10 rounded-full blur-[140px] pointer-events-none" />

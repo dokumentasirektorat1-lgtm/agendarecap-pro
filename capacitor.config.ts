@@ -1,18 +1,17 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+const devServerUrl = process.env.CAPACITOR_SERVER_URL;
+
 const config: CapacitorConfig = {
   appId: 'com.agendarecap.app',
   appName: 'AgendaRecap Pro',
-  webDir: 'public',
-  server: {
-    url: 'https://agendarecap.vercel.app',
+  webDir: 'out',
+  server: devServerUrl ? {
+    url: devServerUrl,
     cleartext: true,
+  } : {
     androidScheme: 'https',
-    hostname: 'agendarecap.vercel.app',
-    errorPath: 'index.html',
     allowNavigation: [
-      'agendarecap.vercel.app',
-      '*.vercel.app',
       '*.supabase.co'
     ]
   },

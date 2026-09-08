@@ -1,3 +1,5 @@
+"use client";
+
 import { ShieldAlert, LogOut } from "lucide-react";
 import { logout } from "@/app/login/actions";
 
@@ -23,7 +25,7 @@ export default function WaitingApprovalPage() {
           </p>
         </div>
 
-        <form action={logout} className="w-full mt-2">
+        <form onSubmit={(e) => { e.preventDefault(); logout(); }} className="w-full mt-2">
           <button 
             type="submit"
             className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all text-zinc-300 hover:text-white font-medium hover:scale-[1.02] active:scale-95"

@@ -1,6 +1,4 @@
-"use server";
-
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 
 export interface AppSettings {
   id?: string;
@@ -14,7 +12,7 @@ export interface AppSettings {
 
 export async function getAppSettings(): Promise<AppSettings | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
@@ -55,7 +53,7 @@ export async function getAppSettings(): Promise<AppSettings | null> {
 
 export async function saveAppSettings(settings: Partial<AppSettings>) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {

@@ -1,9 +1,7 @@
-"use server";
-
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 
 export async function getAgendasByMonth(year: number, month: number) {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // month is 1-indexed (1 = Jan, 12 = Dec)
   const startDate = new Date(year, month - 1, 1).toISOString();
@@ -26,7 +24,7 @@ export async function getAgendasByMonth(year: number, month: number) {
 }
 
 export async function getAgendasByDate(dateString: string) {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // dateString is expected to be YYYY-MM-DD
   const startDate = new Date(dateString);
@@ -51,7 +49,7 @@ export async function getAgendasByDate(dateString: string) {
 }
 
 export async function updateAgenda(agendaId: string, updates: any) {
-  const supabase = await createClient();
+  const supabase = createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   if (!user) {

@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-static';
+export function generateStaticParams() { return [{ id: 'placeholder' }]; }
 
 function getAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';

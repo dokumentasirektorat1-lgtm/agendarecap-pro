@@ -27,16 +27,32 @@ public class NotificationActionReceiver extends BroadcastReceiver {
             notificationManager.cancel(notificationId);
         }
 
+        long now = System.currentTimeMillis();
+
         if ("com.agendarecap.app.ACTION_CLOSE".equals(action)) {
             if (occurrenceId != null) {
                 AlarmStorage.removeAlarm(context, occurrenceId);
+
+                // Persist COMPLETE action into NativeActionStorage
+                try {
+                    String actionId = "act_complete_" + now + "_" + occurrenceId;
+                    JSONObject json = new JSONObject();
+                    json.put("actionId", actionId);
+                    json.put("type", "COMPLETE");
+                    json.put("reminderId", reminderId);
+                    json.put("occurrenceId", occurrenceId);
+                    json.put("timestamp", now);
+                    NativeActionStorage.saveAction(context, actionId, json.toString());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         } else if (action.startsWith("com.agendarecap.app.ACTION_SNOOZE")) {
             int minutes = 5;
             if ("com.agendarecap.app.ACTION_SNOOZE_15".equals(action)) minutes = 15;
             if ("com.agendarecap.app.ACTION_SNOOZE_60".equals(action)) minutes = 60;
 
-            long snoozeTargetTimeMs = System.currentTimeMillis() + (minutes * 60 * 1000L);
+            long snoozeTargetTimeMs = now + (minutes * 60 * 1000L);
 
             try {
                 AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
@@ -48,7 +64,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                     alarmIntent.putExtra("note", note);
                     alarmIntent.putExtra("sound", sound);
 
-                    int pendingIntentId = (occurrenceId != null) ? Math.abs(occurrenceId.hashCode()) : (int) System.currentTimeMillis();
+                    int pendingIntentId = (occurrenceId != null) ? Math.abs(occurrenceId.hashCode()) : (int) now;
 
                     PendingIntent pendingIntent = PendingIntent.getBroadcast(
                             context,
@@ -75,6 +91,21 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                         AlarmStorage.saveAlarm(context, occurrenceId, json.toString());
                     }
                 }
+
+                // Persist SNOOZE action into NativeActionStorage
+                if (occurrenceId != null) {
+                    String actionId = "act_snooze_" + now + "_" + occurrenceId;
+                    JSONObject json = new JSONObject();
+                    json.put("actionId", actionId);
+                    json.put("type", "SNOOZE");
+                    json.put("reminderId", reminderId);
+                    json.put("occurrenceId", occurrenceId);
+                    json.put("minutes", minutes);
+                    json.put("snoozedUntilMs", snoozeTargetTimeMs);
+                    json.put("timestamp", now);
+                    NativeActionStorage.saveAction(context, actionId, json.toString());
+                }
+
             } catch (Exception e) {
                 e.printStackTrace();
             }
