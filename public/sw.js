@@ -109,7 +109,8 @@ self.addEventListener('push', (event) => {
       reminderId,
       occurrenceId,
       scheduledAt: data.scheduledAt,
-      isRecurring: data.isRecurring || false
+      isRecurring: data.isRecurring || false,
+      agendaId: data.agendaId
     },
     // STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE (5 MIN / 15 MIN / 1 HOUR)
     actions: [
@@ -123,16 +124,25 @@ self.addEventListener('push', (event) => {
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
+// In-memory set to prevent notificationclose race conditions when an explicit click action is handled
+const handledTags = new Set();
+
 // 5. Notification Click Handler - Process CLOSE and SNOOZE (Zero OPEN Window Call)
 self.addEventListener('notificationclick', (event) => {
+  const notificationTag = event.notification.tag;
+  if (notificationTag) {
+    handledTags.add(notificationTag);
+    setTimeout(() => handledTags.delete(notificationTag), 10000);
+  }
+
   event.notification.close();
 
   const action = event.action;
   const notificationData = event.notification.data || {};
-  const reminderId = notificationData.reminderId || event.notification.tag.split('-')[1];
-  const occurrenceId = notificationData.occurrenceId || 'unknown';
+  const reminderId = notificationData.reminderId || (notificationTag ? notificationTag.split('-')[1] : null);
+  const occurrenceId = notificationData.occurrenceId || (notificationTag ? notificationTag.split('-')[2] : 'unknown');
 
-  console.log(`[SW v5] Notification click: action=${action} occurrenceId=${occurrenceId} reminderId=${reminderId}`);
+  console.log(`[SW v5] Notification click: action="${action}" occurrenceId=${occurrenceId} reminderId=${reminderId}`);
 
   // Handle Snooze Actions (5 MIN, 15 MIN, 1 HOUR)
   if (action === 'snooze_5' || action === 'snooze_15' || action === 'snooze_60') {
@@ -165,7 +175,7 @@ self.addEventListener('notificationclick', (event) => {
     return;
   }
 
-  // Handle Body Click (no action specified) -> Open/Focus window navigating to Agenda Detail or Reminders page
+  // Handle Body Click (no action button pressed) -> Open/Focus window
   if (!action || action === 'open' || action === '') {
     const targetUrl = notificationData.agendaId ? `/consultation?id=${notificationData.agendaId}` : (notificationData.url || '/reminders');
     console.log(`[SW v5] Body clicked -> Navigating client to ${targetUrl}`);
@@ -209,15 +219,20 @@ self.addEventListener('notificationclick', (event) => {
   );
 });
 
-// 6. Notification Close Event (User swipes away or clicks X on notification)
+// 6. Notification Close Event (User swipes away or clicks X on notification OS pop-up)
 self.addEventListener('notificationclose', (event) => {
+  const notificationTag = event.notification.tag;
+  if (notificationTag && handledTags.has(notificationTag)) {
+    console.log(`[SW v5] Notification close event ignored (action already handled for tag=${notificationTag})`);
+    return;
+  }
+
   const notificationData = event.notification.data || {};
-  const reminderId = notificationData.reminderId || event.notification.tag.split('-')[1];
-  const occurrenceId = notificationData.occurrenceId || 'unknown';
+  const reminderId = notificationData.reminderId || (notificationTag ? notificationTag.split('-')[1] : null);
+  const occurrenceId = notificationData.occurrenceId || (notificationTag ? notificationTag.split('-')[2] : 'unknown');
 
-  console.log(`[SW v5] Notification closed (X pressed): occurrenceId=${occurrenceId} reminderId=${reminderId}`);
+  console.log(`[SW v5] Notification closed by OS (swipe/X): occurrenceId=${occurrenceId} reminderId=${reminderId}`);
 
-  // Mark occurrence completed/dismissed so it will NEVER trigger or loop again
   event.waitUntil(
     fetch(`/api/reminders/${reminderId}`, {
       method: 'PATCH',

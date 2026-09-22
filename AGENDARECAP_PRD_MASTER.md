@@ -1814,13 +1814,29 @@ Summary of Activation & Verification:
 
 ---
 
-# 53. CURRENT IMMEDIATE PRIORITY
+# 54. PHASE C3.3 — WEB PUSH NOTIFICATION UX HARDENING
+
+Status:
+
+**C3.3 IMPLEMENTED — VERIFICATION PENDING**
+
+Summary of Hardening:
+* Added `handledTags` tracking Set in `public/sw.js` to eliminate race conditions between `notificationclick` and `notificationclose`. Handled actions (`snooze_5`, `snooze_15`, `snooze_60`, `close`) are never overwritten by generic OS notification close (`dismissed`).
+* Enforced `requireInteraction: true` and standardized `notificationTag` format (`agenda-${reminderId}-${occurrenceId}`) to guarantee sticky OS pop-ups without notification duplication.
+* Preserved strict action buttons: `CLOSE` (marks occurrence `completed`), `SNOOZE 5 MIN` (+5m), `SNOOZE 15 MIN` (+15m), and `SNOOZE 1 HOUR` (+60m).
+* Excluded "OPEN" button from notification action list; notification body click opens or focuses application window.
+* Retained foreground `ReminderNotifier.tsx` fallback for non-push sessions while maintaining server-side state synchronization via SW `postMessage`.
+* Zero changes to C3.2 scheduler engine, atomic claims, Android native alarm engine, or canonical relational database schemas.
+
+---
+
+# 55. CURRENT IMMEDIATE PRIORITY
 
 Prioritas terdekat:
 
 ```text
-1. Phase C3.3 — Web Push Notification Actions (Close / Snooze 5m / Snooze 15m / Snooze 1h) Audit & Verification
-2. Multi-device Web Push verification across active browser sessions
+1. End-to-end physical browser verification for Web Push Notification Actions (Close / Snooze 5m / Snooze 15m / Snooze 1h)
+2. Multi-device Web Push notification delivery verification
 ```
 
 ---
