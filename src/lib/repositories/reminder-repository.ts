@@ -96,8 +96,8 @@ export class ReminderRepository {
     }
 
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    const userId = user?.id || 'offline_user';
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = session?.user?.id || 'offline_user';
 
     const nowISO = now.toISOString();
 

@@ -210,7 +210,7 @@ export class SyncRepository {
               if (!sanitizedPayload.id) {
                 sanitizedPayload.id = item.entity_id;
               }
-              if (user && (!sanitizedPayload.user_id || sanitizedPayload.user_id === 'undefined')) {
+              if (user) {
                 sanitizedPayload.user_id = user.id;
               }
 
@@ -222,7 +222,7 @@ export class SyncRepository {
             } else if (item.operation === 'UPDATE') {
               const sanitizedPayload = sanitizeAgendaForSupabase(item.payload);
               delete sanitizedPayload.id; // Primary key column remains unchanged
-              if (user && (!sanitizedPayload.user_id || sanitizedPayload.user_id === 'undefined')) {
+              if (user) {
                 sanitizedPayload.user_id = user.id;
               }
 
@@ -268,9 +268,7 @@ export class SyncRepository {
               const occurrencePayload = item.payload.occurrence ? sanitizeOccurrenceForSupabase(item.payload.occurrence) : null;
 
               if (user) {
-                if (!reminderPayload.user_id || reminderPayload.user_id === 'undefined') {
-                  reminderPayload.user_id = user.id;
-                }
+                reminderPayload.user_id = user.id;
               }
 
               const { error: rErr } = await supabase.from('reminders').upsert(reminderPayload);
@@ -286,6 +284,10 @@ export class SyncRepository {
             } else if (item.operation === 'UPDATE') {
               const sanitizedPayload = sanitizeReminderForSupabase(item.payload);
               delete sanitizedPayload.id;
+
+              if (user) {
+                sanitizedPayload.user_id = user.id;
+              }
 
               const { error } = await supabase
                 .from('reminders')

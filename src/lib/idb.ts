@@ -510,7 +510,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       agendasReq.onsuccess = () => {
         const items = (agendasReq.result || []) as IDBAgenda[];
         for (const item of items) {
-          if (!item.user_id || item.user_id === 'undefined') {
+          if (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user' || item.user_id !== userId) {
             item.user_id = userId;
             agendaStore.put(item);
             repairedAgendas++;
@@ -527,7 +527,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       remindersReq.onsuccess = () => {
         const items = (remindersReq.result || []) as IDBReminder[];
         for (const item of items) {
-          if (!item.user_id || item.user_id === 'undefined') {
+          if (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user' || item.user_id !== userId) {
             item.user_id = userId;
             reminderStore.put(item);
             repairedReminders++;
@@ -544,7 +544,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       occReq.onsuccess = () => {
         const items = (occReq.result || []) as IDBOccurrence[];
         for (const item of items) {
-          if (!item.user_id || item.user_id === 'undefined') {
+          if (!item.user_id || item.user_id === 'undefined' || item.user_id === 'offline_user' || item.user_id !== userId) {
             item.user_id = userId;
             occStore.put(item);
             repairedOccurrences++;
@@ -554,7 +554,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       };
     });
 
-    // 4. Repair Offline Queue items & reset FAILED_RETRYABLE status
+    // 4. Repair Offline Queue items & reset FAILED status to PENDING
     const queueStore = tx.objectStore('offline_queue');
     const queueReq = queueStore.getAll();
     await new Promise<void>((res) => {
@@ -564,11 +564,11 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
           let updated = false;
 
           if (item.payload) {
-            if (!item.payload.user_id || item.payload.user_id === 'undefined') {
+            if (!item.payload.user_id || item.payload.user_id === 'undefined' || item.payload.user_id === 'offline_user' || item.payload.user_id !== userId) {
               item.payload.user_id = userId;
               updated = true;
             }
-            if (item.payload.reminder && (!item.payload.reminder.user_id || item.payload.reminder.user_id === 'undefined')) {
+            if (item.payload.reminder && (!item.payload.reminder.user_id || item.payload.reminder.user_id === 'undefined' || item.payload.reminder.user_id === 'offline_user' || item.payload.reminder.user_id !== userId)) {
               item.payload.reminder.user_id = userId;
               updated = true;
             }
