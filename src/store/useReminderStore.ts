@@ -132,13 +132,15 @@ export const useReminderStore = create<ReminderStoreState>()(
             });
           }
 
-          // 3. Update UI State immediately
-          await get().fetchReminders();
-
-          // 4. Trigger background sync
+          // 3. Eagerly sync to Supabase BEFORE updating UI — ensures occurrence is in the
+          // server database so the external scheduler can find it even if the tab is
+          // closed immediately after the user saves the reminder.
           if (typeof navigator !== 'undefined' && navigator.onLine) {
-            syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+            await syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Post-create sync notice:', e));
           }
+
+          // 4. Update UI State (after sync so we reflect server-confirmed state)
+          await get().fetchReminders();
 
           return true;
         } catch (e: any) {
@@ -172,13 +174,14 @@ export const useReminderStore = create<ReminderStoreState>()(
             });
           }
 
-          // 3. Update UI State
-          await get().fetchReminders();
-
-          // 4. Trigger background sync
+          // 3. Eagerly sync to Supabase BEFORE refreshing UI — ensures updated occurrence
+          // is on the server so the external scheduler can claim it even if tab closes.
           if (typeof navigator !== 'undefined' && navigator.onLine) {
-            syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+            await syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Post-update sync notice:', e));
           }
+
+          // 4. Update UI State
+          await get().fetchReminders();
 
           return true;
         } catch (e: any) {
@@ -221,11 +224,13 @@ export const useReminderStore = create<ReminderStoreState>()(
           });
         }
 
-        await get().fetchReminders();
-
+        // Eagerly sync to Supabase before returning so occurrence is on server
+        // for server-driven Web Push delivery even when tab is immediately closed.
         if (typeof navigator !== 'undefined' && navigator.onLine) {
-          syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Sync notice:', e));
+          await syncRepository.runSync().catch(e => console.warn('[REMINDER STORE] Post-reactivate sync notice:', e));
         }
+
+        await get().fetchReminders();
       },
 
       snoozeOccurrence: async (reminderId, occurrenceId, minutes) => {
