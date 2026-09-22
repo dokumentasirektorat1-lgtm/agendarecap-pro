@@ -387,62 +387,70 @@ export class SyncRepository {
             console.log(`[SYNC ENGINE] Queue item ${rawItem.id} synced successfully.`);
           } else {
             const nextRetry = (item.retry_count || 0) + 1;
-            const isFatal = nextRetry > 10;
             const errCode = queryError?.code || 'NO_CODE';
             const errMessage = queryError?.message || 'Sync query rejected';
             const errDetails = queryError?.details || 'None';
             const errHint = queryError?.hint || 'None';
 
-            console.error(`[SYNC ENGINE] ===== SYNC FAILURE =====`);
-            console.error(`Queue ID: ${rawItem.id}`);
-            console.error(`Entity Type: ${item.entity_type || 'UNKNOWN'}`);
-            console.error(`Entity ID: ${item.entity_id || 'UNKNOWN'}`);
-            console.error(`Operation: ${item.operation || 'UNKNOWN'}`);
-            console.error(`Attempt: ${nextRetry}`);
-            console.error(`Status: ${isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE'}`);
-            console.error(`Supabase Error Code: ${errCode}`);
-            console.error(`Supabase Error Message: ${errMessage}`);
-            console.error(`Supabase Error Details: ${errDetails}`);
-            console.error(`Supabase Error Hint: ${errHint}`);
-            console.error(`Queue Payload:`, JSON.stringify(item.payload, null, 2));
-            console.error(`[SYNC ENGINE] ===== END SYNC FAILURE =====`);
+            console.warn(`[SYNC ENGINE] ===== SYNC FAILURE =====`);
+            console.warn(`Queue ID: ${rawItem.id}`);
+            console.warn(`Entity Type: ${item.entity_type || 'UNKNOWN'}`);
+            console.warn(`Entity ID: ${item.entity_id || 'UNKNOWN'}`);
+            console.warn(`Operation: ${item.operation || 'UNKNOWN'}`);
+            console.warn(`Attempt: ${nextRetry}`);
+            console.warn(`Supabase Error Code: ${errCode}`);
+            console.warn(`Supabase Error Message: ${errMessage}`);
+            console.warn(`Supabase Error Details: ${errDetails}`);
+            console.warn(`Supabase Error Hint: ${errHint}`);
+            console.warn(`Queue Payload:`, JSON.stringify(item.payload, null, 2));
+            console.warn(`[SYNC ENGINE] ===== END SYNC FAILURE =====`);
 
+            // Purge unresolvable / legacy failed queue items to clear offline_queue
+            if (nextRetry >= 2 || errCode === '42501' || errCode === '23505' || errCode === 'RLS_OR_ZERO_ROWS') {
+              console.warn(`[SYNC ENGINE] Purging unresolvable queue item ${rawItem.id} from IndexedDB.`);
+              await removeFromOfflineQueue(rawItem.id);
+            } else {
+              await updateQueueItemInIDB({
+                ...item,
+                id: rawItem.id,
+                retry_count: nextRetry,
+                status: 'FAILED_RETRYABLE',
+                error_message: `${errCode}: ${errMessage}`
+              });
+            }
+          }
+        } catch (err: any) {
+          const nextRetry = (item.retry_count || 0) + 1;
+
+          console.warn(`[SYNC ENGINE] ===== SYNC EXCEPTION FAILURE =====`);
+          console.warn(`Queue ID: ${rawItem.id}`);
+          console.warn(`Entity Type: ${item?.entity_type || 'UNKNOWN'}`);
+          console.warn(`Entity ID: ${item?.entity_id || 'UNKNOWN'}`);
+          console.warn(`Operation: ${item?.operation || 'UNKNOWN'}`);
+          console.warn(`Attempt: ${nextRetry}`);
+          console.warn(`Error Name: ${err?.name || 'Error'}`);
+          console.warn(`Error Message: ${err?.message || String(err)}`);
+          console.warn(`Error Stack: ${err?.stack || 'None'}`);
+          if (err?.code) console.warn(`Supabase Error Code: ${err.code}`);
+          if (err?.details) console.warn(`Supabase Error Details: ${err.details}`);
+          if (err?.hint) console.warn(`Supabase Error Hint: ${err.hint}`);
+          console.warn(`Queue Payload:`, JSON.stringify(item?.payload, null, 2));
+          console.warn(`[SYNC ENGINE] ===== END SYNC EXCEPTION FAILURE =====`);
+
+          errors.push(err.message || String(err));
+          
+          if (nextRetry >= 2) {
+            console.warn(`[SYNC ENGINE] Purging exception-failed queue item ${rawItem.id} from IndexedDB.`);
+            await removeFromOfflineQueue(rawItem.id);
+          } else {
             await updateQueueItemInIDB({
               ...item,
               id: rawItem.id,
               retry_count: nextRetry,
-              status: isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE',
-              error_message: `${errCode}: ${errMessage}`
+              status: 'FAILED_RETRYABLE',
+              error_message: err.message || String(err)
             });
           }
-        } catch (err: any) {
-          const nextRetry = (item.retry_count || 0) + 1;
-          const isFatal = nextRetry > 10;
-
-          console.error(`[SYNC ENGINE] ===== SYNC EXCEPTION FAILURE =====`);
-          console.error(`Queue ID: ${rawItem.id}`);
-          console.error(`Entity Type: ${item?.entity_type || 'UNKNOWN'}`);
-          console.error(`Entity ID: ${item?.entity_id || 'UNKNOWN'}`);
-          console.error(`Operation: ${item?.operation || 'UNKNOWN'}`);
-          console.error(`Attempt: ${nextRetry}`);
-          console.error(`Status: ${isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE'}`);
-          console.error(`Error Name: ${err?.name || 'Error'}`);
-          console.error(`Error Message: ${err?.message || String(err)}`);
-          console.error(`Error Stack: ${err?.stack || 'None'}`);
-          if (err?.code) console.error(`Supabase Error Code: ${err.code}`);
-          if (err?.details) console.error(`Supabase Error Details: ${err.details}`);
-          if (err?.hint) console.error(`Supabase Error Hint: ${err.hint}`);
-          console.error(`Queue Payload:`, JSON.stringify(item?.payload, null, 2));
-          console.error(`[SYNC ENGINE] ===== END SYNC EXCEPTION FAILURE =====`);
-
-          errors.push(err.message || String(err));
-          await updateQueueItemInIDB({
-            ...item,
-            id: rawItem.id,
-            retry_count: nextRetry,
-            status: isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE',
-            error_message: err.message || String(err)
-          });
         }
       }
 
