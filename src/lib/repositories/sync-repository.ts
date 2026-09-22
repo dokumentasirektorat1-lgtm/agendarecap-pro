@@ -178,7 +178,8 @@ export class SyncRepository {
 
     try {
       // 0. Check Auth & Repair Orphan Local Data / Queue
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user || null;
 
       if (user) {
         console.log(`[SYNC ENGINE] Authenticated user active: ${user.id}`);
@@ -272,11 +273,27 @@ export class SyncRepository {
               }
 
               const { error: rErr } = await supabase.from('reminders').upsert(reminderPayload);
-              let oErr: any = null;
+              if (rErr) {
+                console.error('[SYNC ENGINE] Reminders table upsert rejected:', rErr);
+              }
 
-              if (occurrencePayload && occurrencePayload.id) {
-                const { error } = await supabase.from('reminder_occurrences').upsert(occurrencePayload);
-                oErr = error;
+              let oErr: any = null;
+              if (occurrencePayload && (occurrencePayload.id || item.entity_id)) {
+                if (!occurrencePayload.reminder_id) {
+                  occurrencePayload.reminder_id = reminderPayload.id || item.entity_id;
+                }
+                if (!occurrencePayload.scheduled_at) {
+                  occurrencePayload.scheduled_at = new Date().toISOString();
+                }
+                if (!occurrencePayload.notification_tag && occurrencePayload.reminder_id && occurrencePayload.id) {
+                  occurrencePayload.notification_tag = `reminder-${occurrencePayload.reminder_id}-occurrence-${occurrencePayload.id}`;
+                }
+
+                const { error: errorOcc } = await supabase.from('reminder_occurrences').upsert(occurrencePayload);
+                if (errorOcc) {
+                  console.error('[SYNC ENGINE] Reminder occurrences table upsert rejected:', errorOcc);
+                  oErr = errorOcc;
+                }
               }
 
               queryError = rErr || oErr;
