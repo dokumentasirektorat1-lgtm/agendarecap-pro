@@ -367,36 +367,62 @@ export class SyncRepository {
             syncedCount++;
             console.log(`[SYNC ENGINE] Queue item ${rawItem.id} synced successfully.`);
           } else {
-            if (queryError) {
-              console.error('[SYNC ENGINE] Supabase query rejection:', {
-                code: queryError.code,
-                message: queryError.message,
-                details: queryError.details,
-                hint: queryError.hint
-              });
-            }
-
             const nextRetry = (item.retry_count || 0) + 1;
             const isFatal = nextRetry > 10;
+            const errCode = queryError?.code || 'NO_CODE';
+            const errMessage = queryError?.message || 'Sync query rejected';
+            const errDetails = queryError?.details || 'None';
+            const errHint = queryError?.hint || 'None';
+
+            console.error(`[SYNC ENGINE] ===== SYNC FAILURE =====`);
+            console.error(`Queue ID: ${rawItem.id}`);
+            console.error(`Entity Type: ${item.entity_type || 'UNKNOWN'}`);
+            console.error(`Entity ID: ${item.entity_id || 'UNKNOWN'}`);
+            console.error(`Operation: ${item.operation || 'UNKNOWN'}`);
+            console.error(`Attempt: ${nextRetry}`);
+            console.error(`Status: ${isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE'}`);
+            console.error(`Supabase Error Code: ${errCode}`);
+            console.error(`Supabase Error Message: ${errMessage}`);
+            console.error(`Supabase Error Details: ${errDetails}`);
+            console.error(`Supabase Error Hint: ${errHint}`);
+            console.error(`Queue Payload:`, JSON.stringify(item.payload, null, 2));
+            console.error(`[SYNC ENGINE] ===== END SYNC FAILURE =====`);
+
             await updateQueueItemInIDB({
               ...item,
               id: rawItem.id,
               retry_count: nextRetry,
               status: isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE',
-              error_message: queryError ? `${queryError.code}: ${queryError.message}` : 'Sync rejected'
+              error_message: `${errCode}: ${errMessage}`
             });
-            console.warn(`[SYNC ENGINE] Queue item ${rawItem.id} sync failed (Attempt ${nextRetry}).`);
           }
         } catch (err: any) {
-          console.error(`[SYNC ENGINE] Error processing item ${rawItem.id}:`, err);
-          errors.push(err.message);
           const nextRetry = (item.retry_count || 0) + 1;
+          const isFatal = nextRetry > 10;
+
+          console.error(`[SYNC ENGINE] ===== SYNC EXCEPTION FAILURE =====`);
+          console.error(`Queue ID: ${rawItem.id}`);
+          console.error(`Entity Type: ${item?.entity_type || 'UNKNOWN'}`);
+          console.error(`Entity ID: ${item?.entity_id || 'UNKNOWN'}`);
+          console.error(`Operation: ${item?.operation || 'UNKNOWN'}`);
+          console.error(`Attempt: ${nextRetry}`);
+          console.error(`Status: ${isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE'}`);
+          console.error(`Error Name: ${err?.name || 'Error'}`);
+          console.error(`Error Message: ${err?.message || String(err)}`);
+          console.error(`Error Stack: ${err?.stack || 'None'}`);
+          if (err?.code) console.error(`Supabase Error Code: ${err.code}`);
+          if (err?.details) console.error(`Supabase Error Details: ${err.details}`);
+          if (err?.hint) console.error(`Supabase Error Hint: ${err.hint}`);
+          console.error(`Queue Payload:`, JSON.stringify(item?.payload, null, 2));
+          console.error(`[SYNC ENGINE] ===== END SYNC EXCEPTION FAILURE =====`);
+
+          errors.push(err.message || String(err));
           await updateQueueItemInIDB({
             ...item,
             id: rawItem.id,
             retry_count: nextRetry,
-            status: nextRetry > 10 ? 'FAILED_FATAL' : 'FAILED_RETRYABLE',
-            error_message: err.message
+            status: isFatal ? 'FAILED_FATAL' : 'FAILED_RETRYABLE',
+            error_message: err.message || String(err)
           });
         }
       }
