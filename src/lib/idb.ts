@@ -561,6 +561,21 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
       queueReq.onsuccess = () => {
         const items = (queueReq.result || []) as IDBOfflineQueueItem[];
         for (const item of items) {
+          // Purge corrupted/invalid queue items
+          if (!item.id || !item.entity_id || !item.payload || (typeof item.payload === 'object' && Object.keys(item.payload).length === 0)) {
+            queueStore.delete(item.id);
+            repairedQueue++;
+            continue;
+          }
+
+          // Purge queue items that have failed excessively (> 5 retries)
+          if ((item.retry_count || 0) > 5 || item.status === 'FAILED_FATAL') {
+            console.warn(`[IDB REPAIR] Purging permanently failed queue item ${item.id} (Attempt ${item.retry_count})`);
+            queueStore.delete(item.id);
+            repairedQueue++;
+            continue;
+          }
+
           let updated = false;
 
           if (item.payload) {
@@ -584,7 +599,7 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
             }
           }
 
-          if (item.status === 'FAILED_RETRYABLE' || item.status === 'FAILED_FATAL') {
+          if (item.status === 'FAILED_RETRYABLE') {
             item.status = 'PENDING';
             item.retry_count = 0;
             item.error_message = undefined;
