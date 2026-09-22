@@ -406,6 +406,22 @@ export class SyncRepository {
                 .eq('id', item.entity_id);
               queryError = error;
               success = !error;
+            } else if (item.operation === 'UPDATE' || item.operation === 'CREATE') {
+              const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
+              if (!sanitizedPayload.id && item.entity_id) {
+                sanitizedPayload.id = item.entity_id;
+              }
+              console.log(`[CMD LOG][SYNC ENGINE] Upserting Occurrence: ID="${sanitizedPayload.id}" Status="${sanitizedPayload.status}"`);
+              const { error } = await supabase
+                .from('reminder_occurrences')
+                .upsert(sanitizedPayload);
+              queryError = error;
+              success = !error;
+              if (error) {
+                console.warn('[CMD LOG][SYNC ENGINE] Occurrence upsert FAILED:', error.message, error.code);
+              } else {
+                console.log('[CMD LOG][SYNC ENGINE] Occurrence upsert SUCCESS');
+              }
             }
           }
 

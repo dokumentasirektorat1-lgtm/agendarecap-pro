@@ -16,7 +16,7 @@ export async function handleCronJob(request: Request) {
   const isDev = process.env.NODE_ENV === 'development';
 
   // Production authentication enforcement
-  if (expectedSecret) {
+  if (expectedSecret && !isDev) {
     const url = new URL(request.url);
     const authHeader = request.headers.get('authorization');
     const cronSecretHeader = request.headers.get('x-cron-secret');
@@ -30,7 +30,7 @@ export async function handleCronJob(request: Request) {
       console.warn('[CRON API] Unauthorized cron request attempt');
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-  } else if (!isDev) {
+  } else if (!expectedSecret && !isDev) {
     console.error('[CRON API] CRON_SECRET environment variable is missing in production environment');
     return NextResponse.json(
       { error: 'Server authentication configuration missing' },

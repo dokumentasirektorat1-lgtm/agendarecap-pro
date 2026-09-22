@@ -30,18 +30,29 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
 
     const adminSupabase = getAdminClient();
-    const { error } = await adminSupabase
+    const pushPayload: any = {
+      endpoint,
+      p256dh,
+      auth,
+      subscription,
+      user_id,
+      device_info: deviceInfo || null,
+      reminders: reminders || null,
+      last_seen_at: now
+    };
+
+    let { error } = await adminSupabase
       .from('push_subscribers')
-      .upsert({
-        endpoint,
-        p256dh,
-        auth,
-        subscription,
-        user_id,
-        device_info: deviceInfo || null,
-        reminders: reminders || null,
-        last_seen_at: now
-      });
+      .upsert(pushPayload);
+
+    if (error && (error as any).code === 'PGRST204') {
+      console.warn('[PUSH SUBSCRIBE] PGRST204 column error detected. Retrying without top-level auth column.');
+      delete pushPayload.auth;
+      const retry = await adminSupabase
+        .from('push_subscribers')
+        .upsert(pushPayload);
+      error = retry.error;
+    }
 
     if (error) {
       console.error('API /api/push/subscribe error:', error);
