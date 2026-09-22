@@ -45,7 +45,7 @@ export default function ServiceWorkerRegistration() {
       try {
         const swUrl = new URL('/sw.js', window.location.origin).href;
         const registration = await navigator.serviceWorker.register(swUrl, { scope: '/' });
-        console.log('[ServiceWorker v5] Registered with scope:', registration.scope);
+        console.log('[ServiceWorker v6] Registered with scope:', registration.scope);
 
         // Check for updates on every page load
         registration.update().catch(() => {});
@@ -55,13 +55,13 @@ export default function ServiceWorkerRegistration() {
           if (installingWorker) {
             installingWorker.onstatechange = () => {
               if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[ServiceWorker v5] New Service Worker version installed and ready.');
+                console.log('[ServiceWorker v6] New Service Worker version installed and ready.');
               }
             };
           }
         });
       } catch (err) {
-        console.error('[ServiceWorker v5] Registration failed:', err);
+        console.error('[ServiceWorker v6] Registration failed:', err);
       }
     };
 
