@@ -46,6 +46,18 @@ export function getTimezoneOffsetMinutes(timeZone: string, date: Date = new Date
 }
 
 /**
+ * Returns today's date in YYYY-MM-DD format for a given IANA timezone (e.g. "Asia/Jakarta").
+ */
+export function getTodayLocalYYYYMMDD(timeZoneName: string = 'Asia/Jakarta'): string {
+  try {
+    const formatter = new Intl.DateTimeFormat('sv-SE', { timeZone: timeZoneName });
+    return formatter.format(new Date());
+  } catch (e) {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
+/**
  * Formats a UTC ISO string into a human-readable local time string in specified timezone.
  */
 export function formatLocalFromUTC(utcISOString: string, timeZone: string = 'Asia/Jakarta'): string {

@@ -8,7 +8,7 @@ import {
   IDBReminder, 
   IDBOccurrence 
 } from "@/lib/idb";
-import { getUTCISOFromLocal } from "@/lib/timezone";
+import { getUTCISOFromLocal, getTodayLocalYYYYMMDD } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeReminderForSupabase, sanitizeOccurrenceForSupabase } from "@/lib/repositories/sanitizer";
 import { isNativePlatform, cancelNativeLocalAlarm, getScheduledNativeAlarms } from "@/lib/native-alarm";
@@ -41,7 +41,7 @@ export class ReminderRepository {
 
     let scheduledAtISO = input.scheduledAt;
     if (!scheduledAtISO && input.time) {
-      const targetDateStr = input.scheduledDate || now.toISOString().split("T")[0];
+      const targetDateStr = input.scheduledDate || getTodayLocalYYYYMMDD(userTimezone);
       scheduledAtISO = getUTCISOFromLocal(targetDateStr, input.time, userTimezone);
     }
 
@@ -59,7 +59,7 @@ export class ReminderRepository {
         } else {
           // Default to tomorrow same local time if reactivating an expired one-time reminder without date override
           const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-          const tomorrowStr = tomorrow.toISOString().split("T")[0];
+          const tomorrowStr = new Intl.DateTimeFormat('sv-SE', { timeZone: userTimezone }).format(tomorrow);
           scheduledAtISO = getUTCISOFromLocal(tomorrowStr, input.time || "08:00", userTimezone);
         }
       }
