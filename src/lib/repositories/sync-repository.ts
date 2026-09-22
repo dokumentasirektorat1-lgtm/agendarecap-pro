@@ -272,9 +272,13 @@ export class SyncRepository {
                 reminderPayload.user_id = user.id;
               }
 
+              console.log(`[CMD LOG][SYNC ENGINE] Pushing Reminder to Supabase: ID="${reminderPayload.id}" Title="${reminderPayload.title}" UserID="${reminderPayload.user_id}"`);
+
               const { error: rErr } = await supabase.from('reminders').upsert(reminderPayload);
               if (rErr) {
-                console.error('[SYNC ENGINE] Reminders table upsert rejected:', rErr);
+                console.warn('[CMD LOG][SYNC ENGINE] Reminders table upsert FAILED:', rErr.message, rErr.code);
+              } else {
+                console.log('[CMD LOG][SYNC ENGINE] Reminders table upsert SUCCESS');
               }
 
               let oErr: any = null;
@@ -289,10 +293,14 @@ export class SyncRepository {
                   occurrencePayload.notification_tag = `reminder-${occurrencePayload.reminder_id}-occurrence-${occurrencePayload.id}`;
                 }
 
+                console.log(`[CMD LOG][SYNC ENGINE] Pushing Occurrence to Supabase: ID="${occurrencePayload.id}" ScheduledAt="${occurrencePayload.scheduled_at}"`);
+
                 const { error: errorOcc } = await supabase.from('reminder_occurrences').upsert(occurrencePayload);
                 if (errorOcc) {
-                  console.error('[SYNC ENGINE] Reminder occurrences table upsert rejected:', errorOcc);
+                  console.warn('[CMD LOG][SYNC ENGINE] Reminder occurrences table upsert FAILED:', errorOcc.message, errorOcc.code);
                   oErr = errorOcc;
+                } else {
+                  console.log('[CMD LOG][SYNC ENGINE] Reminder occurrences table upsert SUCCESS');
                 }
               }
 

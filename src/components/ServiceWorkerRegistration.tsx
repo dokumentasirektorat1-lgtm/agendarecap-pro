@@ -29,16 +29,24 @@ export default function ServiceWorkerRegistration() {
     // 3. Initialize Global Sync Engine Listeners (online event, visibility change)
     initSyncEngineListeners();
 
-    // 4. Service Worker Registration (Web Push & Offline Fallback)
-    if (!('serviceWorker' in navigator)) return;
+    // 4. Background Dev Cron Poller for Local Testing (Triggers scheduler every 30 seconds)
+    const pollerInterval = setInterval(() => {
+      fetch('/api/cron/reminders')
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.foundCount > 0) {
+            console.log(`[DEV CRON POLLER] Scheduler executed: Found=${data.foundCount}, PushSuccess=${data.successPushCount}`);
+          }
+        })
+        .catch(() => {});
+    }, 30000);
 
-    if (process.env.NODE_ENV === 'development') {
-      navigator.serviceWorker.getRegistrations().then((registrations) => {
-        for (const registration of registrations) {
-          registration.unregister();
-        }
-      });
-      return;
+    // Initial dev trigger immediately on page load
+    fetch('/api/cron/reminders').catch(() => {});
+
+    // 5. Service Worker Registration (Web Push & Offline Fallback)
+    if (!('serviceWorker' in navigator)) {
+      return () => clearInterval(pollerInterval);
     }
 
     const registerSW = async () => {

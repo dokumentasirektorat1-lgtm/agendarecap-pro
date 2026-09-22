@@ -128,6 +128,9 @@ export class ReminderRepository {
       updatedAt: nowISO
     };
 
+    console.log(`[CMD LOG][REMINDER CREATE] Title="${input.title}" | Time="${input.time}" | UserTimezone="${userTimezone}"`);
+    console.log(`[CMD LOG][REMINDER CREATE] Scheduled UTC ISO="${scheduledAtISO}" | Reminder ID="${reminderId}" | Occurrence ID="${occurrenceId}"`);
+
     // Store in IDB synchronously
     await updateSingleReminderInIDB(reminder);
     await updateOccurrenceInIDB(occurrence);
