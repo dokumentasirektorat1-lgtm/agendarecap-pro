@@ -22,6 +22,7 @@ import {
   sanitizeReminderForSupabase, 
   sanitizeOccurrenceForSupabase 
 } from "@/lib/repositories/sanitizer";
+import { getUTCISOFromLocal, getTodayLocalYYYYMMDD } from "@/lib/timezone";
 
 export function serializeSupabaseError(error: unknown) {
   if (!error) return null;
@@ -266,7 +267,7 @@ export class SyncRepository {
           } else if (item.entity_type === 'reminder') {
             if (item.operation === 'CREATE') {
               const reminderPayload = sanitizeReminderForSupabase(item.payload.reminder || item.payload);
-              const occurrencePayload = item.payload.occurrence ? sanitizeOccurrenceForSupabase(item.payload.occurrence) : null;
+              let occurrencePayload = item.payload.occurrence ? sanitizeOccurrenceForSupabase(item.payload.occurrence) : null;
 
               if (user) {
                 reminderPayload.user_id = user.id;
@@ -282,6 +283,25 @@ export class SyncRepository {
               }
 
               let oErr: any = null;
+
+              // Defensive Fallback: If occurrencePayload is missing from queue item, construct it on the fly
+              if (!occurrencePayload && (reminderPayload.id || item.entity_id)) {
+                const targetRemId = reminderPayload.id || item.entity_id;
+                const occId = crypto.randomUUID();
+                const remTz = reminderPayload.timezone || 'Asia/Jakarta';
+                const remTime = reminderPayload.time || '08:00';
+                const todayLocal = getTodayLocalYYYYMMDD(remTz);
+                const schedISO = getUTCISOFromLocal(todayLocal, remTime, remTz);
+
+                occurrencePayload = {
+                  id: occId,
+                  reminder_id: targetRemId,
+                  scheduled_at: schedISO,
+                  status: 'scheduled',
+                  notification_tag: `reminder-${targetRemId}-occurrence-${occId}`
+                };
+              }
+
               if (occurrencePayload && (occurrencePayload.id || item.entity_id)) {
                 if (!occurrencePayload.reminder_id) {
                   occurrencePayload.reminder_id = reminderPayload.id || item.entity_id;
