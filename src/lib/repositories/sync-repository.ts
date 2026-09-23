@@ -406,21 +406,65 @@ export class SyncRepository {
                 .eq('id', item.entity_id);
               queryError = error;
               success = !error;
-            } else if (item.operation === 'UPDATE' || item.operation === 'CREATE') {
+            } else if (item.operation === 'UPDATE') {
+              const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
+              const targetOccId = sanitizedPayload.id || item.entity_id;
+              if (targetOccId) sanitizedPayload.id = targetOccId;
+
+              // 1. First attempt update() to modify status/completed_at without requiring scheduled_at
+              const { data: updateData, error: updateErr } = await supabase
+                .from('reminder_occurrences')
+                .update(sanitizedPayload)
+                .eq('id', targetOccId)
+                .select();
+
+              if (!updateErr && updateData && updateData.length > 0) {
+                queryError = null;
+                success = true;
+                console.log(`[CMD LOG][SYNC ENGINE] Occurrence UPDATE success: ID="${targetOccId}" Status="${sanitizedPayload.status}"`);
+              } else {
+                // 2. Fallback to upsert: Ensure scheduled_at is populated to prevent 23502 NOT NULL violation
+                if (!sanitizedPayload.scheduled_at && targetOccId) {
+                  const localOccs = await getOccurrencesFromIDB();
+                  const localOcc = localOccs.find(o => o.id === targetOccId);
+                  if (localOcc && localOcc.scheduledAt) {
+                    sanitizedPayload.scheduled_at = localOcc.scheduledAt;
+                  } else {
+                    sanitizedPayload.scheduled_at = new Date().toISOString();
+                  }
+                }
+
+                console.log(`[CMD LOG][SYNC ENGINE] Upserting Occurrence (Fallback): ID="${targetOccId}" Status="${sanitizedPayload.status}"`);
+                const { error: upsertErr } = await supabase
+                  .from('reminder_occurrences')
+                  .upsert(sanitizedPayload);
+                queryError = upsertErr;
+                success = !upsertErr;
+
+                if (upsertErr) {
+                  console.warn('[CMD LOG][SYNC ENGINE] Occurrence upsert FAILED:', upsertErr.message, upsertErr.code);
+                } else {
+                  console.log('[CMD LOG][SYNC ENGINE] Occurrence upsert SUCCESS');
+                }
+              }
+            } else if (item.operation === 'CREATE') {
               const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
               if (!sanitizedPayload.id && item.entity_id) {
                 sanitizedPayload.id = item.entity_id;
               }
-              console.log(`[CMD LOG][SYNC ENGINE] Upserting Occurrence: ID="${sanitizedPayload.id}" Status="${sanitizedPayload.status}"`);
+              if (!sanitizedPayload.scheduled_at) {
+                sanitizedPayload.scheduled_at = new Date().toISOString();
+              }
+              console.log(`[CMD LOG][SYNC ENGINE] Creating Occurrence: ID="${sanitizedPayload.id}" Status="${sanitizedPayload.status}"`);
               const { error } = await supabase
                 .from('reminder_occurrences')
                 .upsert(sanitizedPayload);
               queryError = error;
               success = !error;
               if (error) {
-                console.warn('[CMD LOG][SYNC ENGINE] Occurrence upsert FAILED:', error.message, error.code);
+                console.warn('[CMD LOG][SYNC ENGINE] Occurrence CREATE FAILED:', error.message, error.code);
               } else {
-                console.log('[CMD LOG][SYNC ENGINE] Occurrence upsert SUCCESS');
+                console.log('[CMD LOG][SYNC ENGINE] Occurrence CREATE SUCCESS');
               }
             }
           }

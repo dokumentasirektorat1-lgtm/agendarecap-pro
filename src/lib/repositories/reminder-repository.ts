@@ -11,7 +11,7 @@ import {
 import { getUTCISOFromLocal, getTodayLocalYYYYMMDD } from "@/lib/timezone";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeReminderForSupabase, sanitizeOccurrenceForSupabase } from "@/lib/repositories/sanitizer";
-import { isNativePlatform, cancelNativeLocalAlarm, getScheduledNativeAlarms } from "@/lib/native-alarm";
+import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm, getScheduledNativeAlarms } from "@/lib/native-alarm";
 
 export class ReminderRepository {
   async getLocalReminders(): Promise<IDBReminder[]> {
@@ -134,6 +134,18 @@ export class ReminderRepository {
     // Store in IDB synchronously
     await updateSingleReminderInIDB(reminder);
     await updateOccurrenceInIDB(occurrence);
+
+    // Schedule Native OS Alarm if running on Capacitor/Android Native App
+    if (isNativePlatform()) {
+      await scheduleNativeLocalAlarm({
+        reminderId,
+        occurrenceId,
+        title: input.title,
+        body: input.body || '',
+        sound: input.sound || 'default',
+        scheduledAt: scheduledAtISO
+      });
+    }
 
     // Enqueue Mutation for Supabase Sync Engine
     const sanitizedRemPayload = sanitizeReminderForSupabase(reminder);
