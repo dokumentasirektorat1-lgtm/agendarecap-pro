@@ -153,14 +153,17 @@ export function initNativeAlarmListeners(): void {
   if (isNativePlatform()) {
     console.log('[NATIVE ALARM] Native Android Alarm Engine initialized.');
     syncNativeActionsToIndexedDB();
+    syncRepository.runSync().catch(err => console.warn('[NATIVE ALARM] Sync notice:', err));
 
     if (typeof window !== 'undefined') {
       window.addEventListener('focus', () => {
         syncNativeActionsToIndexedDB();
+        syncRepository.runSync().catch(err => console.warn('[NATIVE ALARM] Focus sync notice:', err));
       });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
           syncNativeActionsToIndexedDB();
+          syncRepository.runSync().catch(err => console.warn('[NATIVE ALARM] Visibility sync notice:', err));
         }
       });
     }

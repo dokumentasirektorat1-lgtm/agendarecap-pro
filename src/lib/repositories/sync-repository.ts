@@ -780,28 +780,34 @@ export class SyncRepository {
         }
       });
 
+      const nowMs = Date.now();
+
       for (const occ of localOccurrences) {
         const targetTimeStr = occ.snoozedUntil || occ.scheduledAt;
         const targetTimeMs = new Date(targetTimeStr).getTime();
-        const nowMs = Date.now();
 
-        if ((occ.status === 'scheduled' || occ.status === 'snoozed') && targetTimeMs > nowMs) {
-          const nativeItem = nativeAlarmMap.get(occ.id);
-          const parentReminder = localReminders.find(r => r.id === occ.reminderId);
+        const isFinished = occ.status === 'completed' || occ.status === 'dismissed' || occ.status === 'cancelled';
 
-          if (!nativeItem || !nativeItem.scheduledAtMs || Math.abs(nativeItem.scheduledAtMs - targetTimeMs) > 2000) {
-            await scheduleNativeLocalAlarm({
-              reminderId: occ.reminderId,
-              occurrenceId: occ.id,
-              title: parentReminder?.title || 'Pengingat AgendaRecap',
-              body: parentReminder?.body || '',
-              sound: parentReminder?.sound || 'default',
-              scheduledAt: targetTimeStr
-            });
-          }
-        } else {
+        if (isFinished) {
           if (nativeAlarmMap.has(occ.id)) {
             await cancelNativeLocalAlarm(occ.id);
+          }
+        } else if (occ.status === 'scheduled' || occ.status === 'snoozed' || occ.status === 'sent') {
+          // Keep alarm scheduled if target time is in future or within 60s window (prevents premature cancellation)
+          if (targetTimeMs > nowMs - 60000) {
+            const nativeItem = nativeAlarmMap.get(occ.id);
+            const parentReminder = localReminders.find(r => r.id === occ.reminderId);
+
+            if (!nativeItem || !nativeItem.scheduledAtMs || Math.abs(nativeItem.scheduledAtMs - targetTimeMs) > 2000) {
+              await scheduleNativeLocalAlarm({
+                reminderId: occ.reminderId,
+                occurrenceId: occ.id,
+                title: parentReminder?.title || 'Pengingat AgendaRecap',
+                body: parentReminder?.body || '',
+                sound: parentReminder?.sound || 'default',
+                scheduledAt: targetTimeStr
+              });
+            }
           }
         }
       }
