@@ -42,7 +42,7 @@ export default function DynamicBranding() {
           }
         }
       } catch (error) {
-        console.error("Failed to apply dynamic branding:", error);
+        console.warn("Notice applying dynamic branding:", error);
       }
     };
 

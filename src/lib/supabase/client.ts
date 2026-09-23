@@ -2,6 +2,10 @@ import { createClient as createClientJS, SupabaseClient } from '@supabase/supaba
 
 let cachedSupabaseClient: SupabaseClient | null = null;
 
+const dummyLock = async (name: string, acquireTimeout: number, fn: () => Promise<any>) => {
+  return await fn();
+};
+
 export function createClient(): SupabaseClient {
   if (cachedSupabaseClient) {
     return cachedSupabaseClient;
@@ -18,6 +22,7 @@ export function createClient(): SupabaseClient {
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
+      lock: dummyLock,
     },
   });
 

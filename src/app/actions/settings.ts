@@ -28,7 +28,7 @@ export async function getAppSettings(): Promise<AppSettings | null> {
       .maybeSingle();
 
     if (error) {
-      console.error("Error fetching app settings:", error);
+      console.warn("Notice fetching app settings:", error);
       return null;
     }
 
@@ -48,7 +48,7 @@ export async function getAppSettings(): Promise<AppSettings | null> {
       share_order: validShareOrder
     } as AppSettings;
   } catch (e) {
-    console.error("Failed to getAppSettings:", e);
+    console.warn("Failed to getAppSettings notice:", e);
     return null;
   }
 }
