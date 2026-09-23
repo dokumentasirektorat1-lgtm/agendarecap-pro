@@ -53,7 +53,28 @@ export interface NativeAlarmPluginInterface {
   stopAudioPreview(): Promise<{ playing: boolean }>;
 }
 
-const NativeAlarm = registerPlugin<NativeAlarmPluginInterface>('NativeAlarm');
+const getNativeAlarmPlugin = (): NativeAlarmPluginInterface => {
+  if (typeof window !== 'undefined' && (window as any).__NativeAlarmPluginInstance) {
+    return (window as any).__NativeAlarmPluginInstance;
+  }
+  if (typeof window !== 'undefined' && (window as any).Capacitor?.Plugins?.NativeAlarm) {
+    (window as any).__NativeAlarmPluginInstance = (window as any).Capacitor.Plugins.NativeAlarm;
+    return (window as any).__NativeAlarmPluginInstance;
+  }
+  const plugin = registerPlugin<NativeAlarmPluginInterface>('NativeAlarm');
+  if (typeof window !== 'undefined') {
+    (window as any).__NativeAlarmPluginInstance = plugin;
+  }
+  return plugin;
+};
+
+const NativeAlarm = new Proxy({} as NativeAlarmPluginInterface, {
+  get(_target, prop) {
+    const instance = getNativeAlarmPlugin();
+    const value = (instance as any)[prop];
+    return typeof value === 'function' ? value.bind(instance) : value;
+  }
+});
 
 export interface ScheduleNativeAlarmInput {
   reminderId: string;

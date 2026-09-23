@@ -36,8 +36,6 @@ export async function POST(request: Request) {
       auth,
       subscription,
       user_id,
-      device_info: deviceInfo || null,
-      reminders: reminders || null,
       last_seen_at: now
     };
 
@@ -55,10 +53,11 @@ export async function POST(request: Request) {
     }
 
     if (error) {
-      console.error('API /api/push/subscribe error:', error);
+      console.error('[PUSH SUBSCRIBE] error:', error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    console.log(`[PUSH SUBSCRIBE] success | endpoint="${endpoint.substring(0, 30)}..." user_id="${user_id}"`);
     return NextResponse.json({ success: true, endpoint });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -617,6 +617,74 @@ export class SyncRepository {
           }
         }
       }
+      // Dependency Recovery Pass: retry deferred occurrences whose parent is now synced
+      {
+        const deferredQueue = await getOfflineQueue();
+        const deferredSorted = deferredQueue
+          .filter(raw => {
+            const it = migrateLegacyQueueItem(raw);
+            return it.entity_type === 'occurrence' && it.status !== 'FAILED_FATAL';
+          })
+          .map(raw => ({ rawItem: raw, item: migrateLegacyQueueItem(raw) }));
+
+        for (const { rawItem, item } of deferredSorted) {
+          const parentRemId = getOccurrenceParentReminderId(item);
+          if (!parentRemId) continue;
+
+          let parentExistsOnServer = syncedReminderIdsInBatch.has(parentRemId);
+          if (!parentExistsOnServer) {
+            const { data: parentRow } = await supabase
+              .from('reminders').select('id').eq('id', parentRemId).maybeSingle();
+            if (parentRow) {
+              parentExistsOnServer = true;
+              syncedReminderIdsInBatch.add(parentRemId);
+            }
+          }
+
+          if (!parentExistsOnServer) {
+            console.log(`[SYNC ENGINE] Dependency recovery started | Parent Reminder ID: ${parentRemId}`);
+            const localParent = (await getRemindersFromIDB()).find(r => r.id === parentRemId);
+            if (localParent) {
+              console.log(`[SYNC ENGINE] Parent reminder found locally | Reminder ID: ${parentRemId}`);
+              console.log(`[SYNC ENGINE] Parent queue ensured | Reminder ID: ${parentRemId}`);
+              console.log(`[SYNC ENGINE] Parent reminder sync attempt | Reminder ID: ${parentRemId}`);
+              const reminderPayload = sanitizeReminderForSupabase(localParent);
+              if (user) reminderPayload.user_id = user.id;
+              const { error: pErr } = await supabase.from('reminders').upsert(reminderPayload);
+              if (!pErr) {
+                parentExistsOnServer = true;
+                syncedReminderIdsInBatch.add(parentRemId);
+                console.log(`[SYNC ENGINE] Parent reminder verified in Supabase | Reminder ID: ${parentRemId}`);
+              } else {
+                console.warn(`[SYNC ENGINE] Parent reminder sync attempt failed: ${pErr.message}`);
+                continue;
+              }
+            } else {
+              console.warn(`[SYNC ENGINE] Parent reminder not found in local IndexedDB | Reminder ID: ${parentRemId}`);
+              continue;
+            }
+          }
+
+          try {
+            const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
+            if (!sanitizedPayload.id && item.entity_id) sanitizedPayload.id = item.entity_id;
+            if (!sanitizedPayload.scheduled_at) sanitizedPayload.scheduled_at = new Date().toISOString();
+            if (!sanitizedPayload.reminder_id) sanitizedPayload.reminder_id = parentRemId;
+
+            console.log(`[SYNC ENGINE] Retrying dependent occurrence | Occurrence ID: ${item.entity_id}`);
+            const { error: occErr } = await supabase.from('reminder_occurrences').upsert(sanitizedPayload);
+            if (!occErr) {
+              await removeFromOfflineQueue(rawItem.id);
+              syncedCount++;
+              console.log(`[SYNC ENGINE] Dependent occurrence synced successfully | Occurrence ID: ${item.entity_id}`);
+            } else {
+              console.warn(`[SYNC ENGINE] Deferred occurrence still failed: ${occErr.message}`);
+            }
+          } catch (e: any) {
+            console.warn(`[SYNC ENGINE] Deferred occurrence exception: ${e.message}`);
+          }
+        }
+      }
 
       // 2. Fetch Remote Data from Supabase & Execute Clock-Skew Protected LWW Merge
       if (user) {
