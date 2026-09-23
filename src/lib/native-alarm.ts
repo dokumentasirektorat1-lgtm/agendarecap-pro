@@ -209,6 +209,15 @@ export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput):
 
   if (isNativePlatform()) {
     try {
+      const perms = await checkNativeAlarmPermissions();
+      const exactAlarmGranted = perms.exactAlarm;
+
+      console.log(`[NATIVE ALARM] schedule requested | Occurrence ID: ${input.occurrenceId} | Alarm ID: ${input.reminderId} | Trigger timestamp: ${scheduledAtMs} (${input.scheduledAt}) | Current timestamp: ${nowMs} (${new Date(nowMs).toISOString()}) | Exact alarm permission: ${exactAlarmGranted ? 'GRANTED' : 'NOT GRANTED'} | Schedule result: ATTEMPTING`);
+
+      if (!exactAlarmGranted) {
+        console.warn('[NATIVE ALARM] EXACT_ALARM_PERMISSION = NOT GRANTED');
+      }
+
       const res = await NativeAlarm.schedule({
         reminderId: input.reminderId,
         occurrenceId: input.occurrenceId,
@@ -217,7 +226,7 @@ export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput):
         sound: input.sound || 'default',
         scheduledAtMs
       });
-      console.log(`[NATIVE ALARM] Scheduled native OS exact alarm occurrenceId=${input.occurrenceId} target=${input.scheduledAt} sound=${input.sound || 'default'}`);
+      console.log(`[NATIVE ALARM] schedule result: ${res.success ? 'SUCCESS' : 'FAILED'} | Occurrence ID: ${input.occurrenceId}`);
       return res.success;
     } catch (err: any) {
       console.error('[NATIVE ALARM] Native schedule error:', err);

@@ -145,6 +145,34 @@ function migrateLegacyQueueItem(item: any): IDBOfflineQueueItem {
   };
 }
 
+function getQueueItemPriority(item: IDBOfflineQueueItem): number {
+  if (item.entity_type === 'reminder') {
+    if (item.operation === 'CREATE') return 1;
+    if (item.operation === 'UPDATE') return 2;
+    if (item.operation === 'DELETE') return 8;
+  }
+  if (item.entity_type === 'occurrence') {
+    if (item.operation === 'CREATE') return 3;
+    if (item.operation === 'UPDATE') return 4;
+    if (item.operation === 'SNOOZE' || item.operation === 'COMPLETE' || item.operation === 'DISMISS') return 5;
+    if (item.operation === 'DELETE') return 7;
+  }
+  if (item.entity_type === 'agenda') {
+    if (item.operation === 'CREATE' || item.operation === 'UPDATE') return 6;
+    if (item.operation === 'DELETE') return 8;
+  }
+  return 9;
+}
+
+function getOccurrenceParentReminderId(item: IDBOfflineQueueItem): string | null {
+  if (item.entity_type === 'occurrence') {
+    if (item.payload && typeof item.payload === 'object') {
+      return item.payload.reminder_id || item.payload.reminderId || null;
+    }
+  }
+  return null;
+}
+
 export class SyncRepository {
   async isOnline(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
@@ -198,9 +226,49 @@ export class SyncRepository {
       const rawQueue = await getOfflineQueue();
       console.log(`[SYNC ENGINE] Processing ${rawQueue.length} pending mutations...`);
 
-      for (const rawItem of rawQueue) {
-        const item = migrateLegacyQueueItem(rawItem);
+      const sortedQueue = rawQueue.map(raw => ({
+        rawItem: raw,
+        item: migrateLegacyQueueItem(raw)
+      }));
+
+      sortedQueue.sort((a, b) => {
+        const pA = getQueueItemPriority(a.item);
+        const pB = getQueueItemPriority(b.item);
+        if (pA !== pB) return pA - pB;
+        return (a.item.created_at || 0) - (b.item.created_at || 0);
+      });
+
+      const syncedReminderIdsInBatch = new Set<string>();
+
+      for (const { rawItem, item } of sortedQueue) {
         if (item.status === 'FAILED_FATAL') continue;
+
+        // Parent Existence Guard for Occurrence Mutations
+        if (item.entity_type === 'occurrence' && (item.operation === 'CREATE' || item.operation === 'UPDATE' || item.operation === 'SNOOZE' || item.operation === 'COMPLETE' || item.operation === 'DISMISS')) {
+          const parentRemId = getOccurrenceParentReminderId(item);
+          if (parentRemId) {
+            let parentExistsOnServer = syncedReminderIdsInBatch.has(parentRemId);
+            if (!parentExistsOnServer) {
+              const { data: parentRow, error: parentCheckErr } = await supabase
+                .from('reminders')
+                .select('id')
+                .eq('id', parentRemId)
+                .maybeSingle();
+
+              if (!parentCheckErr && parentRow) {
+                parentExistsOnServer = true;
+                syncedReminderIdsInBatch.add(parentRemId);
+              }
+            }
+
+            if (!parentExistsOnServer) {
+              console.warn(`[SYNC ENGINE] Occurrence deferred — parent reminder not yet synced | Reminder ID: ${parentRemId} | Occurrence ID: ${item.entity_id} | Parent: WAITING`);
+              continue; // DEFER: Skip processing for now, leave in queue as PENDING
+            } else {
+              console.log(`[SYNC ENGINE] Retrying dependent occurrence | Occurrence ID: ${item.entity_id}`);
+            }
+          }
+        }
 
         try {
           let success = false;
@@ -280,6 +348,10 @@ export class SyncRepository {
                 console.warn('[CMD LOG][SYNC ENGINE] Reminders table upsert FAILED:', rErr.message, rErr.code);
               } else {
                 console.log('[CMD LOG][SYNC ENGINE] Reminders table upsert SUCCESS');
+                if (reminderPayload.id) {
+                  syncedReminderIdsInBatch.add(reminderPayload.id);
+                  console.log(`[SYNC ENGINE] Parent reminder synced successfully | Reminder ID: ${reminderPayload.id}`);
+                }
               }
 
               let oErr: any = null;
@@ -340,6 +412,10 @@ export class SyncRepository {
                 .eq('id', item.entity_id);
               queryError = error;
               success = !error;
+              if (success && item.entity_id) {
+                syncedReminderIdsInBatch.add(item.entity_id);
+                console.log(`[SYNC ENGINE] Parent reminder synced successfully | Reminder ID: ${item.entity_id}`);
+              }
             } else if (item.operation === 'DELETE') {
               const { data, error } = await supabase
                 .from('reminders')
@@ -787,27 +863,28 @@ export class SyncRepository {
         const targetTimeMs = new Date(targetTimeStr).getTime();
 
         const isFinished = occ.status === 'completed' || occ.status === 'dismissed' || occ.status === 'cancelled';
+        const shouldSchedule = (occ.status === 'scheduled' || occ.status === 'snoozed' || occ.status === 'sent') && targetTimeMs > nowMs - 60000;
+
+        console.log(`[NATIVE SYNC] Reminder ID: ${occ.reminderId} | Occurrence ID: ${occ.id} | ScheduledAt: ${targetTimeStr} | IsActive: ${!isFinished} | CurrentTime: ${new Date(nowMs).toISOString()} | ShouldSchedule: ${shouldSchedule}`);
 
         if (isFinished) {
           if (nativeAlarmMap.has(occ.id)) {
             await cancelNativeLocalAlarm(occ.id);
           }
-        } else if (occ.status === 'scheduled' || occ.status === 'snoozed' || occ.status === 'sent') {
-          // Keep alarm scheduled if target time is in future or within 60s window (prevents premature cancellation)
-          if (targetTimeMs > nowMs - 60000) {
-            const nativeItem = nativeAlarmMap.get(occ.id);
-            const parentReminder = localReminders.find(r => r.id === occ.reminderId);
+        } else if (shouldSchedule) {
+          const nativeItem = nativeAlarmMap.get(occ.id);
+          const parentReminder = localReminders.find(r => r.id === occ.reminderId);
 
-            if (!nativeItem || !nativeItem.scheduledAtMs || Math.abs(nativeItem.scheduledAtMs - targetTimeMs) > 2000) {
-              await scheduleNativeLocalAlarm({
-                reminderId: occ.reminderId,
-                occurrenceId: occ.id,
-                title: parentReminder?.title || 'Pengingat AgendaRecap',
-                body: parentReminder?.body || '',
-                sound: parentReminder?.sound || 'default',
-                scheduledAt: targetTimeStr
-              });
-            }
+          if (!nativeItem || !nativeItem.scheduledAtMs || Math.abs(nativeItem.scheduledAtMs - targetTimeMs) > 2000) {
+            const schedRes = await scheduleNativeLocalAlarm({
+              reminderId: occ.reminderId,
+              occurrenceId: occ.id,
+              title: parentReminder?.title || 'Pengingat AgendaRecap',
+              body: parentReminder?.body || '',
+              sound: parentReminder?.sound || 'default',
+              scheduledAt: targetTimeStr
+            });
+            console.log(`[NATIVE SYNC] NativeAlarmScheduleResult: ${schedRes ? 'SUCCESS' : 'FAILED'} for occurrence ${occ.id}`);
           }
         }
       }
