@@ -510,7 +510,7 @@ export class SyncRepository {
           .order('scheduled_at', { ascending: true });
 
         if (agendaFetchError) {
-          console.error('[SYNC ENGINE] Fetch remote agendas error:', agendaFetchError);
+          console.warn('[SYNC ENGINE] Fetch remote agendas error:', agendaFetchError);
         } else if (remoteAgendas && Array.isArray(remoteAgendas)) {
           const localAgendas = await getAgendasFromIDB();
           const agendaMap = new Map<string, IDBAgenda>();
@@ -559,7 +559,7 @@ export class SyncRepository {
 
         if (reminderFetchError) {
           const sErr = serializeSupabaseError(reminderFetchError);
-          console.error('[SYNC REMINDERS ERROR]', sErr);
+          console.warn('[SYNC REMINDERS ERROR]', sErr);
         }
 
         console.log('[SYNC OCCURRENCES AUTH]', {
@@ -584,7 +584,7 @@ export class SyncRepository {
 
         if (occFetchError) {
           const sErr = serializeSupabaseError(occFetchError);
-          console.error('[SYNC OCCURRENCES ERROR]', {
+          console.warn('[SYNC OCCURRENCES ERROR]', {
             message: occFetchError?.message,
             code: occFetchError?.code,
             details: occFetchError?.details,
@@ -712,7 +712,7 @@ export class SyncRepository {
       }
 
     } catch (err: any) {
-      console.error('[SYNC ENGINE] Global sync error:', err);
+      console.warn('[SYNC ENGINE] Global sync notice:', err);
       errors.push(err.message);
     }
 
