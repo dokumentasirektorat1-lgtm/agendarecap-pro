@@ -167,9 +167,8 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     const scheduledLocal = formatLocalFromUTC(occ.scheduled_at || nowISO, reminderTz);
     addLog(`Processing Occurrence ID=${occurrenceId} (Reminder ID=${reminderId}) Tag="${notificationTag}" Title="${reminderTitle}" ScheduledAt=${occ.scheduled_at} (${scheduledLocal})`);
 
-    // Target devices matching user_id or all devices if single user
-    const targetSubs = subscribers.filter(s => !occ.user_id || s.user_id === occ.user_id || subscribers.length === 1);
-    const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
+    // Target ALL registered device subscribers (PC, Android Native App, etc.)
+    const subsToSend = subscribers;
 
     // Build Web Push & FCM Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE
     const payloadData = {

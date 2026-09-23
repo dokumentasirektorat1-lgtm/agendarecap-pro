@@ -58,40 +58,51 @@ export default function ServiceWorkerRegistration() {
         // Check for updates on every page load
         registration.update().catch(() => {});
 
-        // Auto-sync Web Push subscription if permission is granted
-        if ('PushManager' in window && Notification.permission === 'granted') {
-          const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-          if (vapidPublicKey) {
-            let sub = await registration.pushManager.getSubscription();
-            if (!sub) {
-              const urlBase64ToUint8Array = (base64String: string) => {
-                const padding = '='.repeat((4 - base64String.length % 4) % 4);
-                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-                const rawData = window.atob(base64);
-                const outputArray = new Uint8Array(rawData.length);
-                for (let i = 0; i < rawData.length; ++i) {
-                  outputArray[i] = rawData.charCodeAt(i);
-                }
-                return outputArray;
-              };
-              sub = await registration.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-              });
+        // Auto-sync Web Push subscription for ALL devices (PC, Android, etc.)
+        if ('PushManager' in window && 'Notification' in window) {
+          let currentPerm = Notification.permission;
+          if (currentPerm === 'default') {
+            try {
+              currentPerm = await Notification.requestPermission();
+            } catch (pErr) {
+              console.warn('[ServiceWorker v6] Permission request notice:', pErr);
             }
+          }
 
-            if (sub) {
-              await fetch('/api/push/subscribe', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  subscription: sub,
-                  deviceInfo: {
-                    userAgent: navigator.userAgent,
-                    platform: navigator.platform
+          if (currentPerm === 'granted') {
+            const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+            if (vapidPublicKey) {
+              let sub = await registration.pushManager.getSubscription();
+              if (!sub) {
+                const urlBase64ToUint8Array = (base64String: string) => {
+                  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+                  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                  const rawData = window.atob(base64);
+                  const outputArray = new Uint8Array(rawData.length);
+                  for (let i = 0; i < rawData.length; ++i) {
+                    outputArray[i] = rawData.charCodeAt(i);
                   }
-                })
-              }).catch(() => {});
+                  return outputArray;
+                };
+                sub = await registration.pushManager.subscribe({
+                  userVisibleOnly: true,
+                  applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                });
+              }
+
+              if (sub) {
+                await fetch('/api/push/subscribe', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    subscription: sub,
+                    deviceInfo: {
+                      userAgent: navigator.userAgent,
+                      platform: Capacitor.isNativePlatform() ? 'Android Native App' : navigator.platform
+                    }
+                  })
+                }).catch(() => {});
+              }
             }
           }
         }
