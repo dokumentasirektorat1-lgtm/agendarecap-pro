@@ -51,6 +51,8 @@ export interface NativeAlarmPluginInterface {
   playAudioPreview(options: { sound: string }): Promise<{ playing: boolean; sound: string }>;
 
   stopAudioPreview(): Promise<{ playing: boolean }>;
+
+  getFCMToken(): Promise<{ token: string }>;
 }
 
 const getNativeAlarmPlugin = (): NativeAlarmPluginInterface => {
@@ -347,4 +349,15 @@ export async function stopNativeAudioPreview(): Promise<boolean> {
     }
   }
   return false;
+}
+
+export async function getNativeFCMToken(): Promise<string | null> {
+  if (!isNativePlatform()) return null;
+  try {
+    const res = await NativeAlarm.getFCMToken();
+    return res && res.token ? res.token : null;
+  } catch (err) {
+    console.warn('[NATIVE ALARM] getFCMToken notice:', err);
+    return null;
+  }
 }

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { initSyncEngineListeners } from "@/lib/sync-engine";
-import { initNativeAlarmListeners } from "@/lib/native-alarm";
+import { initNativeAlarmListeners, getNativeFCMToken } from "@/lib/native-alarm";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
 
@@ -13,7 +13,7 @@ export default function ServiceWorkerRegistration() {
     // 1. Initialize Native Alarm Listeners (Android OS Action Buttons)
     initNativeAlarmListeners();
 
-    // 2. Hardware Back Button handler for Android Native App
+    // 2. Hardware Back Button & App State change handlers for Android Native App
     if (Capacitor.isNativePlatform()) {
       App.addListener('backButton', ({ canGoBack }) => {
         if (canGoBack && window.location.pathname !== '/') {
@@ -23,6 +23,15 @@ export default function ServiceWorkerRegistration() {
         }
       }).catch((err) => {
         console.warn('[CAPACITOR BACK BUTTON] Error registering back button listener:', err);
+      });
+
+      App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) {
+          console.log('[NATIVE APP STATE] App activated — triggering sync and alarm reconciliation');
+          initSyncEngineListeners();
+        }
+      }).catch((err) => {
+        console.warn('[CAPACITOR APP STATE] Error registering appStateChange listener:', err);
       });
     }
 
@@ -44,7 +53,7 @@ export default function ServiceWorkerRegistration() {
     // Initial dev trigger immediately on page load
     fetch('/api/cron/reminders').catch(() => {});
 
-    // 5. Service Worker Registration (Web Push & Offline Fallback)
+    // 5. Service Worker & Native FCM Registration
     if (!('serviceWorker' in navigator)) {
       return () => clearInterval(pollerInterval);
     }
@@ -58,7 +67,7 @@ export default function ServiceWorkerRegistration() {
         // Check for updates on every page load
         registration.update().catch(() => {});
 
-        // Auto-sync Web Push subscription for ALL devices (PC, Android, etc.)
+        // Auto-sync Web Push / FCM subscription for ALL devices (PC, Android, etc.)
         if ('PushManager' in window && 'Notification' in window) {
           let currentPerm = Notification.permission;
           if (currentPerm === 'default') {
@@ -91,11 +100,20 @@ export default function ServiceWorkerRegistration() {
               }
 
               if (sub) {
+                const subJSON = sub.toJSON();
+                if (Capacitor.isNativePlatform()) {
+                  const fcmToken = await getNativeFCMToken();
+                  if (fcmToken) {
+                    (subJSON as any).fcm_token = fcmToken;
+                    console.log('[NATIVE FCM] Attached native FCM device token to push subscription');
+                  }
+                }
+
                 await fetch('/api/push/subscribe', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    subscription: sub,
+                    subscription: subJSON,
                     deviceInfo: {
                       userAgent: navigator.userAgent,
                       platform: Capacitor.isNativePlatform() ? 'Android Native App' : navigator.platform

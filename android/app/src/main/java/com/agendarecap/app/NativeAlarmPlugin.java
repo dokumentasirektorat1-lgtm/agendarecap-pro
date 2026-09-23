@@ -349,6 +349,25 @@ public class NativeAlarmPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    @PluginMethod
+    public void getFCMToken(PluginCall call) {
+        try {
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken()
+                .addOnCompleteListener(task -> {
+                    if (!task.isSuccessful()) {
+                        call.reject("Failed to fetch FCM token: " + task.getException());
+                        return;
+                    }
+                    String token = task.getResult();
+                    JSObject ret = new JSObject();
+                    ret.put("token", token);
+                    call.resolve(ret);
+                });
+        } catch (Exception e) {
+            call.reject("FCM token exception: " + e.getMessage());
+        }
+    }
+
     private void stopMedia() {
         if (mediaPlayer != null) {
             try {
