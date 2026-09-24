@@ -231,8 +231,17 @@ export default function Dashboard() {
     setTimeout(() => setEditingAgenda(null), 300);
   };
 
-  // Convert map to specific Date objects 
-  const agendaDates = agendas.filter(a => a.status !== 'unscheduled').map(a => new Date(a.scheduled_at));
+  // Convert map to specific Date objects grouped by density count
+  const agendaCountsByDate = agendas.filter(a => a.status !== 'unscheduled').reduce((acc, a) => {
+    const key = format(new Date(a.scheduled_at), 'yyyy-MM-dd');
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  const dates1 = Object.entries(agendaCountsByDate).filter(([_, c]) => c === 1).map(([d]) => new Date(d + 'T00:00:00'));
+  const dates2 = Object.entries(agendaCountsByDate).filter(([_, c]) => c === 2).map(([d]) => new Date(d + 'T00:00:00'));
+  const dates3plus = Object.entries(agendaCountsByDate).filter(([_, c]) => c >= 3).map(([d]) => new Date(d + 'T00:00:00'));
+  const allAgendaDates = Object.keys(agendaCountsByDate).map(d => new Date(d + 'T00:00:00'));
 
   return (
     <main className="min-h-screen relative overflow-hidden bg-background">
@@ -375,10 +384,16 @@ export default function Dashboard() {
               onSelect={(d) => d && setSelectedDate(d)}
               className="bg-transparent border-0 w-full flex justify-center p-0"
               modifiers={{
-                hasAgenda: agendaDates
+                hasAgenda: allAgendaDates,
+                'hasAgenda-1': dates1,
+                'hasAgenda-2': dates2,
+                'hasAgenda-3plus': dates3plus,
               }}
               modifiersClassNames={{
-                hasAgenda: "hasAgenda"
+                hasAgenda: "hasAgenda",
+                'hasAgenda-1': "hasAgenda-1",
+                'hasAgenda-2': "hasAgenda-2",
+                'hasAgenda-3plus': "hasAgenda-3plus",
               }}
             />
           </div>

@@ -31,8 +31,9 @@ class FCMService : FirebaseMessagingService() {
         val body = data["body"] ?: remoteMessage.notification?.body ?: "Waktu pengingat Anda telah tiba!"
         val reminderId = data["reminderId"] ?: ""
         val occurrenceId = data["occurrenceId"] ?: ""
+        val sound = data["sound"] ?: "default"
 
-        sendFloatingNotification(title, body, reminderId, occurrenceId)
+        sendFloatingNotification(title, body, reminderId, occurrenceId, sound)
     }
 
     override fun onNewToken(token: String) {
@@ -41,23 +42,23 @@ class FCMService : FirebaseMessagingService() {
         // Token will be synced to backend during app authentication/sync
     }
 
-    private fun sendFloatingNotification(title: String, body: String, reminderId: String, occurrenceId: String) {
+    private fun sendFloatingNotification(title: String, body: String, reminderId: String, occurrenceId: String, sound: String) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelInfo = AlarmReceiver.getSoundChannelInfo(this, sound)
 
         // Configure IMPORTANCE_HIGH Notification Channel for Heads-up / Floating banners
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             val audioAttributes = AudioAttributes.Builder()
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                .setUsage(AudioAttributes.USAGE_ALARM)
                 .build()
 
             val channel = NotificationChannel(
-                CHANNEL_ID,
-                CHANNEL_NAME,
+                channelInfo.channelId,
+                channelInfo.channelName,
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notifikasi pengingat mendesak dengan banner melayang (floating)"
+                description = "Notifikasi pengingat mendesak (${channelInfo.channelName})"
                 enableLights(true)
                 lightColor = Color.BLUE
                 enableVibration(true)
@@ -108,15 +109,13 @@ class FCMService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-
         // Build Floating / Heads-up Notification
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, channelInfo.channelId)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(title)
             .setContentText(body)
             .setAutoCancel(true)
-            .setSound(soundUri)
+            .setSound(channelInfo.soundUri)
             .setVibrate(longArrayOf(0, 500, 200, 500))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)

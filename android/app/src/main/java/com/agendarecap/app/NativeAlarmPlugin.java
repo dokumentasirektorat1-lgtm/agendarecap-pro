@@ -368,6 +368,24 @@ public class NativeAlarmPlugin extends Plugin {
         }
     }
 
+    @PluginMethod
+    public void updateWidgetData(PluginCall call) {
+        JSArray items = call.getArray("items");
+        Context context = getContext();
+
+        try {
+            String jsonStr = (items != null) ? items.toString() : "[]";
+            AgendaWidgetStorage.saveWidgetData(context, jsonStr);
+            AgendaWidgetProvider.updateAllWidgets(context);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to update widget data: " + e.getMessage());
+        }
+    }
+
     private void stopMedia() {
         if (mediaPlayer != null) {
             try {
