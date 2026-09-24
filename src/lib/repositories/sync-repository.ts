@@ -378,17 +378,15 @@ export class SyncRepository {
                 if (!occurrencePayload.reminder_id) {
                   occurrencePayload.reminder_id = reminderPayload.id || item.entity_id;
                 }
-                if (user) {
-                  occurrencePayload.user_id = user.id;
-                }
                 if (!occurrencePayload.scheduled_at) {
                   occurrencePayload.scheduled_at = new Date().toISOString();
                 }
                 if (!occurrencePayload.notification_tag && occurrencePayload.reminder_id && occurrencePayload.id) {
                   occurrencePayload.notification_tag = `reminder-${occurrencePayload.reminder_id}-occurrence-${occurrencePayload.id}`;
                 }
+                delete (occurrencePayload as any).user_id;
 
-                console.log(`[CMD LOG][SYNC ENGINE] Pushing Occurrence to Supabase: ID="${occurrencePayload.id}" ScheduledAt="${occurrencePayload.scheduled_at}" UserID="${occurrencePayload.user_id}"`);
+                console.log(`[CMD LOG][SYNC ENGINE] Pushing Occurrence to Supabase: ID="${occurrencePayload.id}" ScheduledAt="${occurrencePayload.scheduled_at}"`);
 
                 const { error: errorOcc } = await supabase.from('reminder_occurrences').upsert(occurrencePayload);
                 if (errorOcc) {
@@ -462,7 +460,7 @@ export class SyncRepository {
           } else if (item.entity_type === 'occurrence') {
             if (item.operation === 'SNOOZE') {
               const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
-              if (user) sanitizedPayload.user_id = user.id;
+              delete (sanitizedPayload as any).user_id;
               const { error } = await supabase
                 .from('reminder_occurrences')
                 .update({
@@ -482,9 +480,6 @@ export class SyncRepository {
                 dismissed_at: item.operation === 'DISMISS' ? nowISO : null,
                 updated_at: nowISO
               };
-              if (user) {
-                updatePayload.user_id = user.id;
-              }
 
               const { data: updateData, error: updateErr } = await supabase
                 .from('reminder_occurrences')
@@ -503,7 +498,7 @@ export class SyncRepository {
                 sanitizedPayload.status = statusVal;
                 sanitizedPayload.completed_at = updatePayload.completed_at;
                 sanitizedPayload.updated_at = nowISO;
-                if (user) sanitizedPayload.user_id = user.id;
+                delete (sanitizedPayload as any).user_id;
                 if (!sanitizedPayload.scheduled_at) sanitizedPayload.scheduled_at = nowISO;
                 if (!sanitizedPayload.reminder_id && item.payload?.reminderId) sanitizedPayload.reminder_id = item.payload.reminderId;
 
