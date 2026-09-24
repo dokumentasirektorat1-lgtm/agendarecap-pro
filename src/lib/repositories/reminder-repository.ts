@@ -323,73 +323,87 @@ export class ReminderRepository {
     const occurrences = await getOccurrencesFromIDB();
     const target = occurrences.find(o => o.id === occurrenceId);
 
-    if (target) {
-      const nowISO = new Date().toISOString();
-      const snoozeTargetDate = new Date(Date.now() + minutes * 60 * 1000);
-      const snoozedUntilISO = snoozeTargetDate.toISOString();
+    const nowISO = new Date().toISOString();
+    const snoozeTargetDate = new Date(Date.now() + minutes * 60 * 1000);
+    const snoozedUntilISO = snoozeTargetDate.toISOString();
 
-      const updated: IDBOccurrence = {
-        ...target,
-        status: 'snoozed',
-        snoozedUntil: snoozedUntilISO,
-        updatedAt: nowISO
-      };
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = target?.user_id || session?.user?.id || 'offline_user';
 
-      await updateOccurrenceInIDB(updated);
+    const updated: IDBOccurrence = target ? {
+      ...target,
+      status: 'snoozed',
+      snoozedUntil: snoozedUntilISO,
+      updatedAt: nowISO
+    } : {
+      id: occurrenceId,
+      reminderId: reminderId,
+      user_id: userId,
+      scheduledAt: nowISO,
+      status: 'snoozed',
+      snoozedUntil: snoozedUntilISO,
+      notificationTag: `reminder-${reminderId}-occurrence-${occurrenceId}`,
+      createdAt: nowISO,
+      updatedAt: nowISO
+    };
 
-      const sanitizedOccPayload = sanitizeOccurrenceForSupabase(updated);
+    await updateOccurrenceInIDB(updated);
 
-      await addToOfflineQueue({
-        entity_type: 'occurrence',
-        entity_id: occurrenceId,
-        operation: 'UPDATE',
-        payload: sanitizedOccPayload,
-        retry_count: 0,
-        status: 'PENDING'
-      });
+    const sanitizedOccPayload = sanitizeOccurrenceForSupabase(updated);
 
-      return updated;
-    }
+    await addToOfflineQueue({
+      entity_type: 'occurrence',
+      entity_id: occurrenceId,
+      operation: 'SNOOZE',
+      payload: sanitizedOccPayload,
+      retry_count: 0,
+      status: 'PENDING'
+    });
 
-    return null;
+    return updated;
   }
 
   async completeOccurrence(reminderId: string, occurrenceId: string): Promise<IDBOccurrence | null> {
     const occurrences = await getOccurrencesFromIDB();
     const target = occurrences.find(o => o.id === occurrenceId);
 
-    if (target) {
-      const nowISO = new Date().toISOString();
-      const updated: IDBOccurrence = {
-        ...target,
-        status: 'completed',
-        completedAt: nowISO,
-        updatedAt: nowISO
-      };
+    const nowISO = new Date().toISOString();
+    const supabase = createClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    const userId = target?.user_id || session?.user?.id || 'offline_user';
 
-      await updateOccurrenceInIDB(updated);
+    const updated: IDBOccurrence = target ? {
+      ...target,
+      status: 'completed',
+      completedAt: nowISO,
+      updatedAt: nowISO
+    } : {
+      id: occurrenceId,
+      reminderId: reminderId,
+      user_id: userId,
+      scheduledAt: nowISO,
+      status: 'completed',
+      completedAt: nowISO,
+      notificationTag: `reminder-${reminderId}-occurrence-${occurrenceId}`,
+      createdAt: nowISO,
+      updatedAt: nowISO
+    };
 
-      const sanitizedOccPayload = sanitizeOccurrenceForSupabase({
-        id: target.id,
-        reminder_id: reminderId,
-        status: 'completed',
-        completed_at: nowISO,
-        updated_at: nowISO
-      });
+    await updateOccurrenceInIDB(updated);
 
-      await addToOfflineQueue({
-        entity_type: 'occurrence',
-        entity_id: occurrenceId,
-        operation: 'UPDATE',
-        payload: sanitizedOccPayload,
-        retry_count: 0,
-        status: 'PENDING'
-      });
+    const sanitizedOccPayload = sanitizeOccurrenceForSupabase(updated);
 
-      return updated;
-    }
+    await addToOfflineQueue({
+      entity_type: 'occurrence',
+      entity_id: occurrenceId,
+      operation: 'COMPLETE',
+      payload: sanitizedOccPayload,
+      retry_count: 0,
+      status: 'PENDING'
+    });
 
-    return null;
+    return updated;
   }
 
   async delete(id: string): Promise<boolean> {

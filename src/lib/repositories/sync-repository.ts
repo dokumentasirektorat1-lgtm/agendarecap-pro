@@ -378,6 +378,9 @@ export class SyncRepository {
                 if (!occurrencePayload.reminder_id) {
                   occurrencePayload.reminder_id = reminderPayload.id || item.entity_id;
                 }
+                if (user) {
+                  occurrencePayload.user_id = user.id;
+                }
                 if (!occurrencePayload.scheduled_at) {
                   occurrencePayload.scheduled_at = new Date().toISOString();
                 }
@@ -385,7 +388,7 @@ export class SyncRepository {
                   occurrencePayload.notification_tag = `reminder-${occurrencePayload.reminder_id}-occurrence-${occurrencePayload.id}`;
                 }
 
-                console.log(`[CMD LOG][SYNC ENGINE] Pushing Occurrence to Supabase: ID="${occurrencePayload.id}" ScheduledAt="${occurrencePayload.scheduled_at}"`);
+                console.log(`[CMD LOG][SYNC ENGINE] Pushing Occurrence to Supabase: ID="${occurrencePayload.id}" ScheduledAt="${occurrencePayload.scheduled_at}" UserID="${occurrencePayload.user_id}"`);
 
                 const { error: errorOcc } = await supabase.from('reminder_occurrences').upsert(occurrencePayload);
                 if (errorOcc) {
@@ -459,6 +462,7 @@ export class SyncRepository {
           } else if (item.entity_type === 'occurrence') {
             if (item.operation === 'SNOOZE') {
               const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
+              if (user) sanitizedPayload.user_id = user.id;
               const { error } = await supabase
                 .from('reminder_occurrences')
                 .update({
@@ -471,17 +475,44 @@ export class SyncRepository {
               success = !error;
             } else if (item.operation === 'COMPLETE' || item.operation === 'DISMISS') {
               const statusVal = item.operation === 'COMPLETE' ? 'completed' : 'dismissed';
-              const { error } = await supabase
+              const nowISO = new Date().toISOString();
+              const updatePayload: any = {
+                status: statusVal,
+                completed_at: item.operation === 'COMPLETE' ? nowISO : null,
+                dismissed_at: item.operation === 'DISMISS' ? nowISO : null,
+                updated_at: nowISO
+              };
+              if (user) {
+                updatePayload.user_id = user.id;
+              }
+
+              const { data: updateData, error: updateErr } = await supabase
                 .from('reminder_occurrences')
-                .update({
-                  status: statusVal,
-                  completed_at: item.operation === 'COMPLETE' ? new Date().toISOString() : null,
-                  dismissed_at: item.operation === 'DISMISS' ? new Date().toISOString() : null,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', item.entity_id);
-              queryError = error;
-              success = !error;
+                .update(updatePayload)
+                .eq('id', item.entity_id)
+                .select();
+
+              if (!updateErr && updateData && updateData.length > 0) {
+                queryError = null;
+                success = true;
+                console.log(`[CMD LOG][SYNC ENGINE] Occurrence ${item.operation} success: ID="${item.entity_id}"`);
+              } else {
+                // Upsert fallback to ensure row is marked completed on Supabase even if row wasn't pre-existing
+                const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload || {});
+                sanitizedPayload.id = item.entity_id;
+                sanitizedPayload.status = statusVal;
+                sanitizedPayload.completed_at = updatePayload.completed_at;
+                sanitizedPayload.updated_at = nowISO;
+                if (user) sanitizedPayload.user_id = user.id;
+                if (!sanitizedPayload.scheduled_at) sanitizedPayload.scheduled_at = nowISO;
+                if (!sanitizedPayload.reminder_id && item.payload?.reminderId) sanitizedPayload.reminder_id = item.payload.reminderId;
+
+                const { error: upsertErr } = await supabase
+                  .from('reminder_occurrences')
+                  .upsert(sanitizedPayload);
+                queryError = upsertErr;
+                success = !upsertErr;
+              }
             } else if (item.operation === 'UPDATE') {
               const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
               const targetOccId = sanitizedPayload.id || item.entity_id;

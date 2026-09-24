@@ -143,23 +143,21 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     let reminderTz = occ.timezone || 'Asia/Jakarta';
 
     let parentReminder: any = null;
-    if (!reminderTitle) {
-      const { data: rParent } = await adminSupabase
-        .from('reminders')
-        .select('*')
-        .eq('id', occ.reminder_id)
-        .single();
-      parentReminder = rParent;
+    const { data: rParent } = await adminSupabase
+      .from('reminders')
+      .select('*')
+      .eq('id', occ.reminder_id)
+      .single();
+    parentReminder = rParent;
 
-      if (rParent) {
-        reminderTitle = rParent.title;
-        reminderBody = rParent.body;
-        reminderTime = rParent.time;
-        reminderFreq = rParent.frequency;
-        reminderTz = rParent.timezone;
-      } else {
-        reminderTitle = 'Pengingat AgendaRecap';
-      }
+    if (rParent) {
+      reminderTitle = occ.title || rParent.title;
+      reminderBody = occ.body || rParent.body;
+      reminderTime = occ.time || rParent.time;
+      reminderFreq = occ.frequency || rParent.frequency;
+      reminderTz = occ.timezone || rParent.timezone;
+    } else {
+      reminderTitle = occ.title || 'Pengingat AgendaRecap';
     }
 
     const occurrenceId = occ.id;
@@ -170,8 +168,15 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     addLog(`Processing Occurrence ID=${occurrenceId} (Reminder ID=${reminderId}) Tag="${notificationTag}" Title="${reminderTitle}" ScheduledAt=${occ.scheduled_at} (${scheduledLocal})`);
 
     // Target ALL registered device subscribers for this user (PC, Android Native App, etc.)
-    const reminderUserId = occ.user_id || parentReminder?.user_id;
-    const targetSubs = subscribers.filter(s => !reminderUserId || !s.user_id || s.user_id === reminderUserId);
+    const reminderUserId = (occ.user_id && occ.user_id !== 'offline_user')
+      ? occ.user_id
+      : (parentReminder?.user_id && parentReminder.user_id !== 'offline_user')
+        ? parentReminder.user_id
+        : null;
+
+    const targetSubs = reminderUserId
+      ? subscribers.filter(s => !s.user_id || s.user_id === reminderUserId)
+      : subscribers;
     const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
 
     // Build Web Push & FCM Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE

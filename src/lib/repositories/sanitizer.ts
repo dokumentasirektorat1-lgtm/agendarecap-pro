@@ -43,6 +43,7 @@ export interface SupabaseReminderPayload {
 
 export interface SupabaseOccurrencePayload {
   id?: string;
+  user_id?: string;
   reminder_id?: string;
   scheduled_at?: string;
   status?: string;
@@ -123,6 +124,10 @@ export function sanitizeOccurrenceForSupabase(input: any): SupabaseOccurrencePay
   const sanitized: SupabaseOccurrencePayload = {};
 
   if (input.id !== undefined) sanitized.id = input.id;
+
+  if (input.user_id !== undefined || input.userId !== undefined) {
+    sanitized.user_id = input.user_id || input.userId;
+  }
 
   if (input.reminder_id !== undefined) sanitized.reminder_id = input.reminder_id;
   else if (input.reminderId !== undefined) sanitized.reminder_id = input.reminderId;
