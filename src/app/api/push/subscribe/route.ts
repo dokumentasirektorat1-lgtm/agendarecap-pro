@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-static';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 
 function getAdminClient() {
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
 
     const body = await request.json();
-    const { subscription, deviceInfo, reminders } = body;
+    const { subscription, deviceInfo, reminders, fcm_token } = body;
 
     if (!subscription || !subscription.endpoint) {
       return NextResponse.json({ error: 'Missing push subscription endpoint' }, { status: 400 });
@@ -29,6 +29,11 @@ export async function POST(request: Request) {
     const user_id = user?.id || null;
     const now = new Date().toISOString();
 
+    const fcmToken = fcm_token || subscription.fcm_token || null;
+    if (fcmToken) {
+      subscription.fcm_token = fcmToken;
+    }
+
     const adminSupabase = getAdminClient();
     const pushPayload: any = {
       endpoint,
@@ -38,6 +43,10 @@ export async function POST(request: Request) {
       user_id,
       last_seen_at: now
     };
+
+    if (fcmToken) {
+      pushPayload.fcm_token = fcmToken;
+    }
 
     let { error } = await adminSupabase
       .from('push_subscribers')

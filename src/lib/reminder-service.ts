@@ -142,12 +142,14 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     let reminderFreq = occ.frequency || 'once';
     let reminderTz = occ.timezone || 'Asia/Jakarta';
 
+    let parentReminder: any = null;
     if (!reminderTitle) {
       const { data: rParent } = await adminSupabase
         .from('reminders')
         .select('*')
         .eq('id', occ.reminder_id)
         .single();
+      parentReminder = rParent;
 
       if (rParent) {
         reminderTitle = rParent.title;
@@ -167,8 +169,10 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     const scheduledLocal = formatLocalFromUTC(occ.scheduled_at || nowISO, reminderTz);
     addLog(`Processing Occurrence ID=${occurrenceId} (Reminder ID=${reminderId}) Tag="${notificationTag}" Title="${reminderTitle}" ScheduledAt=${occ.scheduled_at} (${scheduledLocal})`);
 
-    // Target ALL registered device subscribers (PC, Android Native App, etc.)
-    const subsToSend = subscribers;
+    // Target ALL registered device subscribers for this user (PC, Android Native App, etc.)
+    const reminderUserId = occ.user_id || parentReminder?.user_id;
+    const targetSubs = subscribers.filter(s => !reminderUserId || !s.user_id || s.user_id === reminderUserId);
+    const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
 
     // Build Web Push & FCM Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE
     const payloadData = {
@@ -191,29 +195,33 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
 
     let pushSuccess = false;
     for (const sub of subsToSend) {
-      addLog(`Sending Push Notification to device endpoint=${sub.endpoint.substring(0, 35)}...`);
+      addLog(`Sending Push Notification to device endpoint=${sub.endpoint ? sub.endpoint.substring(0, 35) : 'unknown'}...`);
       
-      // 1. Send via WebPush
-      try {
-        const res = await webpush.sendNotification(sub.subscription, payload);
-        addLog(`WebPush delivered successfully status=${res.statusCode} endpoint=${sub.endpoint.substring(0, 30)}...`);
-        successPushCount++;
-        pushSuccess = true;
-      } catch (err: any) {
-        failedPushCount++;
-        addLog(`WebPush failed error=${err.message} statusCode=${err.statusCode}`);
-        if (err.statusCode === 404 || err.statusCode === 410) {
-          addLog(`Subscribed endpoint expired (404/410) -> Deleting stale subscription endpoint=${sub.endpoint.substring(0, 30)}...`);
-          await adminSupabase.from('push_subscribers').delete().eq('endpoint', sub.endpoint);
+      // 1. Send via WebPush for standard browser endpoints
+      const isNativeSyntheticEndpoint = sub.endpoint && sub.endpoint.includes('/send/native_fcm');
+      if (sub.subscription && sub.subscription.endpoint && !isNativeSyntheticEndpoint && sub.subscription.keys?.p256dh) {
+        try {
+          const res = await webpush.sendNotification(sub.subscription, payload);
+          addLog(`WebPush delivered successfully status=${res.statusCode} endpoint=${sub.endpoint.substring(0, 30)}...`);
+          successPushCount++;
+          pushSuccess = true;
+        } catch (err: any) {
+          failedPushCount++;
+          addLog(`WebPush failed error=${err.message} statusCode=${err.statusCode}`);
+          if (err.statusCode === 404 || err.statusCode === 410) {
+            addLog(`Subscribed endpoint expired (404/410) -> Deleting stale subscription endpoint=${sub.endpoint.substring(0, 30)}...`);
+            await adminSupabase.from('push_subscribers').delete().eq('endpoint', sub.endpoint);
+          }
         }
       }
 
       // 2. Direct FCM Push payload if subscription contains fcm_token
-      if (sub.subscription && sub.subscription.fcm_token) {
+      const fcmToken = sub.fcm_token || sub.subscription?.fcm_token;
+      if (fcmToken) {
         const fcmServerKey = process.env.FCM_SERVER_KEY;
         if (fcmServerKey) {
           try {
-            addLog(`Sending FCM High-Priority Floating push to token=${sub.subscription.fcm_token.substring(0, 15)}...`);
+            addLog(`Sending FCM High-Priority Floating push to token=${fcmToken.substring(0, 15)}...`);
             const fcmRes = await fetch('https://fcm.googleapis.com/fcm/send', {
               method: 'POST',
               headers: {
@@ -221,7 +229,7 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
                 'Authorization': `key=${fcmServerKey}`
               },
               body: JSON.stringify({
-                to: sub.subscription.fcm_token,
+                to: fcmToken,
                 priority: 'high',
                 data: {
                   title: reminderTitle,
@@ -232,8 +240,9 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
               })
             });
             if (fcmRes.ok) {
-              addLog(`FCM Floating Push delivered successfully to token=${sub.subscription.fcm_token.substring(0, 15)}...`);
+              addLog(`FCM Floating Push delivered successfully to token=${fcmToken.substring(0, 15)}...`);
               pushSuccess = true;
+              successPushCount++;
             }
           } catch (fcmErr: any) {
             addLog(`FCM Push warning: ${fcmErr.message}`);

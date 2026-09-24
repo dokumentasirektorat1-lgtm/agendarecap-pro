@@ -931,7 +931,7 @@ export class SyncRepository {
         const targetTimeMs = new Date(targetTimeStr).getTime();
 
         const isFinished = occ.status === 'completed' || occ.status === 'dismissed' || occ.status === 'cancelled';
-        const shouldSchedule = (occ.status === 'scheduled' || occ.status === 'snoozed' || occ.status === 'sent') && targetTimeMs > nowMs - 60000;
+        const shouldSchedule = (occ.status === 'scheduled' || occ.status === 'snoozed' || occ.status === 'sent' || occ.status === 'processing') && targetTimeMs > nowMs - 60000;
 
         console.log(`[NATIVE SYNC] Reminder ID: ${occ.reminderId} | Occurrence ID: ${occ.id} | ScheduledAt: ${targetTimeStr} | IsActive: ${!isFinished} | CurrentTime: ${new Date(nowMs).toISOString()} | ShouldSchedule: ${shouldSchedule}`);
 

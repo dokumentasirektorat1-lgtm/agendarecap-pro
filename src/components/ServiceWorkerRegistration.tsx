@@ -54,6 +54,39 @@ export default function ServiceWorkerRegistration() {
     fetch('/api/cron/reminders').catch(() => {});
 
     // 5. Service Worker & Native FCM Registration
+    const registerNativeFCM = async () => {
+      if (!Capacitor.isNativePlatform()) return;
+      try {
+        const fcmToken = await getNativeFCMToken();
+        if (fcmToken) {
+          console.log('[NATIVE FCM] Syncing Android FCM token to push_subscribers');
+          await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subscription: {
+                endpoint: `https://fcm.googleapis.com/fcm/send/${fcmToken}`,
+                fcm_token: fcmToken,
+                keys: { p256dh: 'native_fcm', auth: 'native_fcm' }
+              },
+              fcm_token: fcmToken,
+              deviceInfo: {
+                userAgent: navigator.userAgent,
+                platform: 'Android Native App'
+              }
+            })
+          }).catch((e) => console.warn('[NATIVE FCM] Direct subscribe notice:', e));
+        }
+      } catch (fcmErr) {
+        console.warn('[NATIVE FCM] Registration notice:', fcmErr);
+      }
+    };
+
+    // Trigger direct Android FCM registration
+    if (Capacitor.isNativePlatform()) {
+      registerNativeFCM();
+    }
+
     if (!('serviceWorker' in navigator)) {
       return () => clearInterval(pollerInterval);
     }
@@ -81,22 +114,22 @@ export default function ServiceWorkerRegistration() {
           if (currentPerm === 'granted') {
             const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
             if (vapidPublicKey) {
-              let sub = await registration.pushManager.getSubscription();
-              if (!sub) {
-                const urlBase64ToUint8Array = (base64String: string) => {
-                  const padding = '='.repeat((4 - base64String.length % 4) % 4);
-                  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+              let sub = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: (() => {
+                  const padding = '='.repeat((4 - vapidPublicKey.length % 4) % 4);
+                  const base64 = (vapidPublicKey + padding).replace(/-/g, '+').replace(/_/g, '/');
                   const rawData = window.atob(base64);
                   const outputArray = new Uint8Array(rawData.length);
                   for (let i = 0; i < rawData.length; ++i) {
                     outputArray[i] = rawData.charCodeAt(i);
                   }
                   return outputArray;
-                };
-                sub = await registration.pushManager.subscribe({
-                  userVisibleOnly: true,
-                  applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
-                });
+                })()
+              }).catch(() => null);
+
+              if (!sub) {
+                sub = await registration.pushManager.getSubscription();
               }
 
               if (sub) {
@@ -105,7 +138,6 @@ export default function ServiceWorkerRegistration() {
                   const fcmToken = await getNativeFCMToken();
                   if (fcmToken) {
                     (subJSON as any).fcm_token = fcmToken;
-                    console.log('[NATIVE FCM] Attached native FCM device token to push subscription');
                   }
                 }
 
