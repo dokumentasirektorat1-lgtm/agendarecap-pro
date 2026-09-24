@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { processDueReminders } from '@/lib/reminder-service';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   return handleCronJob(request);

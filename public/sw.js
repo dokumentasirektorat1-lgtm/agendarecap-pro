@@ -1,17 +1,15 @@
 // Service Worker for AgendaRecap Pro PWA
 // Offline Shell Caching, Web Push Notification Engine, & Strict Action Handling (CLOSE, SNOOZE 5m/15m/1h)
-// VERSION: v7 (Windows 11 Notification Center — PNG icons + timestamp)
+// VERSION: v6 (Hybrid Alarm Engine, Cache Version Cleanup & Web Push Client Recovery)
 
-const CACHE_NAME = 'agendaku-pwa-v7';
+const CACHE_NAME = 'agendaku-pwa-v6';
 const STATIC_ASSETS = [
   '/',
   '/reminders',
   '/diagnostics',
   '/settings/notifications',
   '/manifest.json',
-  '/icon.svg',
-  '/icons/icon-192.png',
-  '/icons/badge-96.png'
+  '/icon.svg'
 ];
 
 // 1. Install Event - Pre-cache Application Shell Assets & Skip Waiting
@@ -101,15 +99,11 @@ self.addEventListener('push', (event) => {
 
   const options = {
     body,
-    // PNG icons — Chrome/Windows do not reliably render SVG in OS-level notifications.
-    // PNG is required for the icon to display correctly in Windows 11 Notification Center.
-    icon: '/icons/icon-192.png',
-    badge: '/icons/badge-96.png',
+    icon: '/icon.svg',
+    badge: '/icon.svg',
     tag: notificationTag,
-    requireInteraction: true, // STICKY OS POPUP — toast stays until user action
-    renotify: true,           // re-alert even if same tag already exists
-    // timestamp: lets Windows 11 Notification Center sort this entry correctly
-    timestamp: data.scheduledAt ? new Date(data.scheduledAt).getTime() : Date.now(),
+    requireInteraction: true, // STICKY OS POPUP
+    renotify: true,
     vibrate: [300, 100, 300, 100, 300, 100, 300],
     data: {
       reminderId,
