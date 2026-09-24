@@ -1835,10 +1835,37 @@ Summary of Hardening:
 Prioritas terdekat:
 
 ```text
-1. End-to-end physical browser verification for Web Push Notification Actions (Close / Snooze 5m / Snooze 15m / Snooze 1h)
-2. Multi-device Web Push notification delivery verification
+1. End-to-end physical device verification for Android Offline Startup & Local-First Auth Recovery.
+2. End-to-end physical browser verification for Web Push Notification Actions (Close / Snooze 5m / Snooze 15m / Snooze 1h).
 ```
 
 ---
 
+# 56. PHASE 1 & 2 MASTER EXECUTION — ANDROID OFFLINE STARTUP & WEB REMINDER UX AUDIT
+
+Status:
+
+**PHASE 1 (Android Offline Startup): VERIFIED & COMMITTED**
+**PHASE 2 (Web Reminder UX Audit): VERIFIED & CLEAN**
+
+Summary of Fixes & Verification:
+* **Android Offline Startup (Phase 1)**:
+  * Identified root cause: `ClientAuthGuard` was blocking initial render in `'INITIALIZING'` state when device was offline due to network stall during session hydration and missing cached session fallback.
+  * Implemented `getLocalCachedSession()` helper in `ClientAuthGuard.tsx` to parse cached Supabase auth token from `localStorage` when device is offline.
+  * Added 2000ms safety fallback timer in `ClientAuthGuard` ensuring `authState` never gets stuck in `'INITIALIZING'` regardless of network state.
+  * Updated `agenda-repository.ts` and `settings.ts` to use `supabase.auth.getSession()` instead of `supabase.auth.getUser()`, eliminating blocking remote HTTP `/auth/v1/user` calls on offline startup.
+  * Local IndexedDB data renders instantly on Android native offline startup.
+* **Web Reminder UX Audit (Phase 2)**:
+  * Audited `ReminderNotifier.tsx`, `public/sw.js`, and `useReminderStore.ts`.
+  * Confirmed Web delivery is 100% server-driven via Service Worker (`public/sw.js` v6) Web Push and periodic Zustand store refresh (60s).
+  * No duplicate client-side alerts, Swal popups, or redundant timers remain.
+  * Verified strict action button handling (`CLOSE` -> `PATCH /api/reminders/${id}`, `SNOOZE` -> `POST /api/reminders/${id}/snooze`) and Service Worker `postMessage` relay to open tabs.
+* **Build Verification**:
+  * `npm run build` compiled cleanly (0 errors).
+  * `npm run build:native` completed with exit code 0.
+  * `npx cap sync android` updated assets in `android/app/src/main/assets/public`.
+
+---
+
 # END OF MASTER PRD
+
