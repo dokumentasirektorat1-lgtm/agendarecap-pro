@@ -105,6 +105,34 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
     }
   }, [refreshQueueStats]);
 
+function getLocalCachedSession(): Session | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('sb-') && key.endsWith('-auth-token'))) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          const parsed = JSON.parse(item);
+          const user = parsed?.user || parsed?.currentSession?.user;
+          if (user && user.id) {
+            return {
+              access_token: parsed.access_token || 'offline-token',
+              refresh_token: parsed.refresh_token || 'offline-refresh-token',
+              expires_in: parsed.expires_in || 3600,
+              token_type: parsed.token_type || 'bearer',
+              user: user,
+            } as Session;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[AUTH GUARD] Offline cached session parse warning:', e);
+  }
+  return null;
+}
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -132,8 +160,16 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
           console.log('[AUTH GUARD] INITIAL_SESSION resolved -> AUTHENTICATED');
           setAuthState('AUTHENTICATED');
         } else {
-          console.log('[AUTH GUARD] INITIAL_SESSION resolved -> UNAUTHENTICATED');
-          setAuthState('UNAUTHENTICATED');
+          const cached = getLocalCachedSession();
+          if (cached) {
+            console.log('[AUTH GUARD] INITIAL_SESSION null, but cached session present -> AUTHENTICATED');
+            setSession(cached);
+            setUser(cached.user);
+            setAuthState('AUTHENTICATED');
+          } else {
+            console.log('[AUTH GUARD] INITIAL_SESSION resolved -> UNAUTHENTICATED');
+            setAuthState('UNAUTHENTICATED');
+          }
         }
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         console.log(`[AUTH GUARD] Event ${event} -> AUTHENTICATED`);
@@ -154,26 +190,57 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
     const hydrateSession = async () => {
       try {
         const { data: { session: initialSession } } = await supabase.auth.getSession();
-        setSession(initialSession);
-        setUser(initialSession?.user || null);
 
         if (initialSession) {
           console.log('[AUTH GUARD] getSession found session -> AUTHENTICATED');
+          setSession(initialSession);
+          setUser(initialSession.user);
           setAuthState('AUTHENTICATED');
         } else {
-          // If getSession returned null, transition from INITIALIZING to UNAUTHENTICATED
-          console.log('[AUTH GUARD] getSession null -> Transitioning from INITIALIZING to UNAUTHENTICATED');
-          setAuthState(prev => (prev === 'INITIALIZING' ? 'UNAUTHENTICATED' : prev));
+          const cached = getLocalCachedSession();
+          if (cached) {
+            console.log('[AUTH GUARD] getSession null, but found cached local session -> AUTHENTICATED');
+            setSession(cached);
+            setUser(cached.user);
+            setAuthState('AUTHENTICATED');
+          } else {
+            console.log('[AUTH GUARD] getSession null & no cached session -> UNAUTHENTICATED');
+            setAuthState(prev => (prev === 'INITIALIZING' ? 'UNAUTHENTICATED' : prev));
+          }
         }
 
         await refreshQueueStats();
       } catch (err) {
-        console.warn('[AUTH GUARD] Hydration exception:', err);
-        setAuthState('UNAUTHENTICATED');
+        console.warn('[AUTH GUARD] Hydration exception, checking offline fallback:', err);
+        const cached = getLocalCachedSession();
+        if (cached) {
+          setSession(cached);
+          setUser(cached.user);
+          setAuthState('AUTHENTICATED');
+        } else {
+          setAuthState('UNAUTHENTICATED');
+        }
       }
     };
 
     hydrateSession();
+
+    // 3. Fallback safety timer to guarantee state transition out of INITIALIZING
+    const fallbackTimer = setTimeout(() => {
+      setAuthState(prev => {
+        if (prev === 'INITIALIZING') {
+          console.warn('[AUTH GUARD] Fallback timer (2000ms) fired while state is INITIALIZING');
+          const cached = getLocalCachedSession();
+          if (cached) {
+            setSession(cached);
+            setUser(cached.user);
+            return 'AUTHENTICATED';
+          }
+          return 'UNAUTHENTICATED';
+        }
+        return prev;
+      });
+    }, 2000);
 
     // Network Online / Offline Listeners
     const handleOnline = () => {
@@ -189,6 +256,7 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
 
     return () => {
       subscription.unsubscribe();
+      clearTimeout(fallbackTimer);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };

@@ -15,7 +15,8 @@ export interface AppSettings {
 export async function getAppSettings(): Promise<AppSettings | null> {
   try {
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
 
     if (!user) {
       return null;
@@ -56,7 +57,8 @@ export async function getAppSettings(): Promise<AppSettings | null> {
 export async function saveAppSettings(settings: Partial<AppSettings>) {
   try {
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
 
     if (!user) {
       return { success: false, error: "Unauthorized" };

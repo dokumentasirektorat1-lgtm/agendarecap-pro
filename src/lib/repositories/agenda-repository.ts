@@ -24,7 +24,8 @@ export class AgendaRepository {
     const id = input.id || crypto.randomUUID();
 
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user;
 
     const newAgenda: IDBAgenda = {
       ...input,
