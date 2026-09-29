@@ -3,7 +3,7 @@
 import { useStore, Agenda } from "@/store/useStore";
 import { format, isSameDay } from "date-fns";
 import { id } from "date-fns/locale";
-import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing, Menu, Download } from "lucide-react";
+import { Copy, Plus, Share2, CheckCircle2, Circle, Trash2, CalendarHeart, LogOut, MapPin, AlignLeft, Shield, Edit2, Settings, CalendarDays, CalendarRange, ChevronDown, FileDown, X, Video, Link2, Archive, BellRing, Menu, Download, Globe, FileText } from "lucide-react";
 import { useState } from "react";
 import Link from "next/link";
 import Swal from "sweetalert2";
@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { AddAgendaModal } from "@/components/AddAgendaModal";
 import { ExportAgendaModal } from "@/components/ExportAgendaModal";
+import { PublicShareModal } from "@/components/PublicShareModal";
 import { Calendar } from "@/components/Calendar";
 import { MonthlyCalendarView } from "@/components/MonthlyCalendarView";
 import { logout } from "./login/actions";
@@ -18,6 +19,7 @@ import { getAppSettings, AppSettings } from "@/app/actions/settings";
 import { useEffect } from "react";
 import ConnectivityBanner from "@/components/ConnectivityBanner";
 import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
+import { getAgendaTimeDisplay, getAgendaTimeMode } from "@/lib/agenda-time";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -25,6 +27,7 @@ export default function Dashboard() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isCopyDropdownOpen, setIsCopyDropdownOpen] = useState(false);
   const [isShareDropdownOpen, setIsShareDropdownOpen] = useState(false);
+  const [isPublicShareModalOpen, setIsPublicShareModalOpen] = useState(false);
   const [editingAgenda, setEditingAgenda] = useState<Agenda | null>(null);
   const [viewingNotes, setViewingNotes] = useState<{title: string, notes: string} | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings | null>(null);
@@ -231,17 +234,38 @@ export default function Dashboard() {
     setTimeout(() => setEditingAgenda(null), 300);
   };
 
-  // Convert map to specific Date objects grouped by density count
-  const agendaCountsByDate = agendas.filter(a => a.status !== 'unscheduled').reduce((acc, a) => {
-    const key = format(new Date(a.scheduled_at), 'yyyy-MM-dd');
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  // Calculate agenda density per date (taking ALL_DAY into account - Section 21)
+  const agendaDensityByDate = agendas
+    .filter(a => getAgendaTimeMode(a) !== 'unscheduled' && a.scheduled_at && a.status !== 'cancelled')
+    .reduce((acc, a) => {
+      const key = format(new Date(a.scheduled_at!), 'yyyy-MM-dd');
+      if (!acc[key]) {
+        acc[key] = { count: 0, hasAllDay: false };
+      }
+      acc[key].count += 1;
+      if (getAgendaTimeMode(a) === 'all_day') {
+        acc[key].hasAllDay = true;
+      }
+      return acc;
+    }, {} as Record<string, { count: number; hasAllDay: boolean }>);
 
-  const dates1 = Object.entries(agendaCountsByDate).filter(([_, c]) => c === 1).map(([d]) => new Date(d + 'T00:00:00'));
-  const dates2 = Object.entries(agendaCountsByDate).filter(([_, c]) => c === 2).map(([d]) => new Date(d + 'T00:00:00'));
-  const dates3plus = Object.entries(agendaCountsByDate).filter(([_, c]) => c >= 3).map(([d]) => new Date(d + 'T00:00:00'));
-  const allAgendaDates = Object.keys(agendaCountsByDate).map(d => new Date(d + 'T00:00:00'));
+  const dates1 = Object.entries(agendaDensityByDate)
+    .filter(([_, info]) => !info.hasAllDay && info.count === 1)
+    .map(([d]) => new Date(d + 'T00:00:00'));
+
+  const dates2 = Object.entries(agendaDensityByDate)
+    .filter(([_, info]) => !info.hasAllDay && (info.count === 2 || info.count === 3))
+    .map(([d]) => new Date(d + 'T00:00:00'));
+
+  const dates4 = Object.entries(agendaDensityByDate)
+    .filter(([_, info]) => !info.hasAllDay && info.count === 4)
+    .map(([d]) => new Date(d + 'T00:00:00'));
+
+  const datesFull = Object.entries(agendaDensityByDate)
+    .filter(([_, info]) => info.hasAllDay || info.count >= 5)
+    .map(([d]) => new Date(d + 'T00:00:00'));
+
+  const allAgendaDates = Object.keys(agendaDensityByDate).map(d => new Date(d + 'T00:00:00'));
 
   return (
     <main className="min-h-screen relative overflow-hidden bg-background">
@@ -387,13 +411,15 @@ export default function Dashboard() {
                 hasAgenda: allAgendaDates,
                 'hasAgenda-1': dates1,
                 'hasAgenda-2': dates2,
-                'hasAgenda-3plus': dates3plus,
+                'hasAgenda-4': dates4,
+                'hasAgenda-full': datesFull,
               }}
               modifiersClassNames={{
                 hasAgenda: "hasAgenda",
                 'hasAgenda-1': "hasAgenda-1",
                 'hasAgenda-2': "hasAgenda-2",
-                'hasAgenda-3plus': "hasAgenda-3plus",
+                'hasAgenda-4': "hasAgenda-4",
+                'hasAgenda-full': "hasAgenda-full",
               }}
             />
           </div>
@@ -461,19 +487,21 @@ export default function Dashboard() {
 
         {/* Right Column: Time-Slot Visualizer & Details */}
         <section className="flex-1 min-w-0 pb-32 md:pb-0">
-          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 mb-6 glass p-6 rounded-[2rem] border border-white/5 shadow-xl">
-            <div className="min-w-0 flex-1">
+          <div className="flex flex-col gap-4 mb-6 glass p-6 rounded-[2rem] border border-white/5 shadow-xl">
+            {/* Today Summary Header (Placed ABOVE button row - Section 27) */}
+            <div className="min-w-0 flex-1 border-b border-white/5 pb-3">
               <h2 className="text-xl sm:text-2xl font-bold text-white mb-1 truncate">
                 {format(selectedDate, "EEEE, d MMMM yyyy", { locale: id })}
               </h2>
-              <p className="text-zinc-400 text-sm">
+              <p className="text-zinc-400 text-sm font-medium">
                 {selectedAgendas.length > 0 
                   ? `Terdapat ${selectedAgendas.length} agenda di tanggal ini.` 
                   : "Tidak ada jadwal untuk tanggal ini."}
               </p>
             </div>
             
-            <div className="flex gap-2.5 w-full xl:w-auto flex-wrap xl:flex-nowrap items-center xl:justify-end shrink-0">
+            {/* Toolbar Button Row */}
+            <div className="flex gap-2.5 w-full flex-wrap xl:flex-nowrap items-center shrink-0">
               {/* Copy Split Button */}
               <div className="relative flex-1 sm:flex-none">
                 <div className="inline-flex items-center rounded-xl shadow-lg shadow-blue-500/20 bg-blue-500 hover:bg-blue-600 transition-all w-full">
@@ -640,11 +668,36 @@ export default function Dashboard() {
                             <div className="text-[10px] text-zinc-400">Senin s/d Minggu minggu ini</div>
                           </div>
                         </button>
+                        <div className="border-t border-white/5 my-1" />
+
+                        <button
+                          onClick={() => {
+                            setIsPublicShareModalOpen(true);
+                            setIsShareDropdownOpen(false);
+                          }}
+                          className="w-full flex items-start gap-2.5 px-3 py-2 text-xs text-zinc-300 hover:text-white hover:bg-white/10 transition-colors text-left font-medium"
+                        >
+                          <Globe className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                          <div>
+                            <div className="font-semibold text-white">Link Agenda (Read-Only)</div>
+                            <div className="text-[10px] text-zinc-400">Bagikan tautan agenda tanpa login</div>
+                          </div>
+                        </button>
                       </motion.div>
                     </>
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* Export Action Button (Replaces Bagikan Link - Section 11) */}
+              <button
+                onClick={() => setIsExportModalOpen(true)}
+                className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold rounded-xl text-sm shadow-lg shadow-purple-500/20 transition-all active:scale-95"
+                title="Export Agenda (PDF Full, Rentang Waktu, Excel)"
+              >
+                <FileText className="w-4 h-4 text-white" />
+                <span>Export</span>
+              </button>
 
               {/* Toggle View Mode Button */}
               <div className="flex bg-white/5 rounded-xl border border-white/5 p-1 shadow-lg w-full sm:w-auto overflow-hidden">
@@ -734,7 +787,7 @@ export default function Dashboard() {
                               {index + 1}
                             </td>
                             <td className="px-6 py-5 text-white font-semibold">
-                              {format(new Date(agenda.scheduled_at), "HH:mm")}
+                              {getAgendaTimeDisplay(agenda)}
                             </td>
                             <td className="px-6 py-5">
                               <button
@@ -953,6 +1006,11 @@ export default function Dashboard() {
         )}
       </AnimatePresence>
 
+      <PublicShareModal
+        isOpen={isPublicShareModalOpen}
+        onClose={() => setIsPublicShareModalOpen(false)}
+        selectedDate={selectedDate}
+      />
     </main>
   );
 }

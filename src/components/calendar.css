@@ -108,19 +108,26 @@
 
 .custom-calendar .hasAgenda-1::after {
   width: 10px;
-  background-color: #a855f7; /* Single agenda: light purple bar */
+  background-color: #a855f7; /* 1 agenda: light purple bar */
 }
 
 .custom-calendar .hasAgenda-2::after {
   width: 18px;
-  background-color: #3b82f6; /* 2 agendas: blue bar */
+  background-color: #3b82f6; /* 2-3 agendas: blue bar */
 }
 
-.custom-calendar .hasAgenda-3plus::after {
-  width: 26px;
+.custom-calendar .hasAgenda-4::after {
+  width: 24px;
   height: 4px;
-  background: linear-gradient(to right, #a855f7, #06b6d4); /* 3+ agendas: vibrant gradient bar */
-  box-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+  background-color: #f59e0b; /* 4 agendas: amber/padat bar */
+}
+
+.custom-calendar .hasAgenda-full::after,
+.custom-calendar .hasAgenda-3plus::after {
+  width: 28px;
+  height: 4.5px;
+  background: linear-gradient(to right, #ec4899, #8b5cf6, #06b6d4); /* 5+ agendas or ALL_DAY: full gradient bar */
+  box-shadow: 0 0 10px rgba(236, 72, 153, 0.7);
 }
 
 .custom-calendar .rdp-selected.hasAgenda::after {

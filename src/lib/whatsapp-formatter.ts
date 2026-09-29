@@ -1,11 +1,13 @@
 import { AppSettings } from "@/app/actions/settings";
 import { format, addDays, startOfWeek, isSameDay } from "date-fns";
+import { getAgendaTimeDisplay } from "@/lib/agenda-time";
 
 export interface AgendaItem {
   id: string;
   title: string;
   location?: string | null;
   scheduled_at: string;
+  time_mode?: string | null;
   notes?: string | null;
   privateNotes?: string | null;
   include_notes_in_share: boolean;
@@ -81,7 +83,7 @@ export function formatAgendasToWhatsApp(
     text += `*${index + 1}. ${agenda.title}*${statusInfo}\n`;
 
     // 2. Waktu & Lokasi
-    const time = format(new Date(agenda.scheduled_at), "HH:mm");
+    const time = getAgendaTimeDisplay(agenda);
     let detailLine = time;
     if (agenda.location) {
       detailLine += ` — ${agenda.location}`;
@@ -182,7 +184,7 @@ export function formatWeeklyAgendasToWhatsApp(
         const statusInfo = agenda.is_completed ? " (Selesai)" : "";
         text += `*${idx + 1}. ${agenda.title}*${statusInfo}\n`;
 
-        const time = format(new Date(agenda.scheduled_at), "HH:mm");
+        const time = getAgendaTimeDisplay(agenda);
         let detailLine = time;
         if (agenda.location) {
           detailLine += ` — ${agenda.location}`;

@@ -4,6 +4,30 @@ import { agendaRepository } from "@/lib/repositories/agenda-repository";
 import { syncRepository } from "@/lib/repositories/sync-repository";
 import Swal from "sweetalert2";
 
+import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode, AgendaTimeMode } from "@/lib/agenda-time";
+import { updateNativeWidgetData, isNativePlatform } from "@/lib/native-alarm";
+import { isSameDay } from "date-fns";
+
+function syncWidgetData(agendas: Agenda[]) {
+  if (!isNativePlatform()) return;
+  try {
+    const today = new Date();
+    const todayAgendas = agendas.filter(a => {
+      if (a.status === 'cancelled') return false;
+      if (getAgendaTimeMode(a) === 'unscheduled') return false;
+      if (!a.scheduled_at) return false;
+      return isSameDay(new Date(a.scheduled_at), today);
+    });
+
+    const widgetItems = todayAgendas.map(a => ({
+      title: a.title,
+      time: getAgendaTimeDisplay(a)
+    }));
+
+    updateNativeWidgetData(widgetItems).catch(() => {});
+  } catch (e) {}
+}
+
 export type Agenda = {
   id: string;
   user_id?: string;
@@ -11,6 +35,7 @@ export type Agenda = {
   location: string;
   notes?: string;
   scheduled_at: string;
+  time_mode?: AgendaTimeMode;
   privateNotes?: string;
   is_completed: boolean;
   include_notes_in_share: boolean;
@@ -68,13 +93,17 @@ export const useStore = create<StoreState>((set, get) => {
     try {
       // 1. Instant local IndexedDB load (Local First)
       const localAgendas = await agendaRepository.getLocal();
-      set({ agendas: deduplicateAgendas(localAgendas as Agenda[]), isLoading: false });
+      const deduped = deduplicateAgendas(localAgendas as Agenda[]);
+      set({ agendas: deduped, isLoading: false });
+      syncWidgetData(deduped);
 
       // 2. Background Sync if online
       if (typeof navigator !== 'undefined' && navigator.onLine) {
         await syncRepository.runSync();
         const updatedLocal = await agendaRepository.getLocal();
-        set({ agendas: deduplicateAgendas(updatedLocal as Agenda[]) });
+        const updatedDeduped = deduplicateAgendas(updatedLocal as Agenda[]);
+        set({ agendas: updatedDeduped });
+        syncWidgetData(updatedDeduped);
       }
     } catch (e: any) {
       console.error("Fetch agendas error:", e);
@@ -95,6 +124,7 @@ export const useStore = create<StoreState>((set, get) => {
           (a, b) => new Date(a.scheduled_at || 0).getTime() - new Date(b.scheduled_at || 0).getTime()
         ),
       }));
+      syncWidgetData(get().agendas);
 
       // 3. Trigger background sync if online
       if (typeof navigator !== 'undefined' && navigator.onLine) {
@@ -129,6 +159,7 @@ export const useStore = create<StoreState>((set, get) => {
           a.id === id ? (updated as Agenda) : a
         ),
       }));
+      syncWidgetData(get().agendas);
 
       // 3. Trigger background sync if online
       if (typeof navigator !== 'undefined' && navigator.onLine) {
@@ -146,6 +177,7 @@ export const useStore = create<StoreState>((set, get) => {
       set((state) => ({
         agendas: state.agendas.filter((a) => a.id !== id),
       }));
+      syncWidgetData(get().agendas);
 
       // 3. Trigger background sync if online
       if (typeof navigator !== 'undefined' && navigator.onLine) {
@@ -174,6 +206,7 @@ export const useStore = create<StoreState>((set, get) => {
         set((state) => ({
           agendas: state.agendas.map((a) => (a.id === id ? (updated as Agenda) : a)),
         }));
+        syncWidgetData(get().agendas);
 
         // 3. Trigger background sync if online
         if (typeof navigator !== 'undefined' && navigator.onLine) {

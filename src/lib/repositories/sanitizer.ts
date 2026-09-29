@@ -10,6 +10,7 @@ export interface SupabaseAgendaPayload {
   title?: string;
   location?: string;
   scheduled_at?: string;
+  time_mode?: string;
   notes?: string;
   include_notes_in_share?: boolean;
   is_completed?: boolean;
@@ -65,6 +66,7 @@ export function sanitizeAgendaForSupabase(input: any): SupabaseAgendaPayload {
   if (input.title !== undefined) sanitized.title = input.title;
   if (input.location !== undefined) sanitized.location = input.location;
   if (input.scheduled_at !== undefined) sanitized.scheduled_at = input.scheduled_at;
+  if (input.time_mode !== undefined) sanitized.time_mode = input.time_mode;
   if (input.notes !== undefined) sanitized.notes = input.notes;
   if (input.include_notes_in_share !== undefined) sanitized.include_notes_in_share = input.include_notes_in_share;
   if (input.is_completed !== undefined) sanitized.is_completed = input.is_completed;
@@ -165,6 +167,7 @@ export function mapAgendaFromSupabase(r: any): any {
     location: r.location || '',
     notes: r.notes || '',
     scheduled_at: r.scheduled_at,
+    time_mode: r.time_mode || undefined,
     privateNotes: r.privateNotes || '',
     is_completed: Boolean(r.is_completed),
     include_notes_in_share: Boolean(r.include_notes_in_share),

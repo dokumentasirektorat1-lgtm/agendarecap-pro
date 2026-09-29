@@ -38,24 +38,28 @@ export default function ServiceWorkerRegistration() {
     // 3. Initialize Global Sync Engine Listeners (online event, visibility change)
     initSyncEngineListeners();
 
-    // 4. Background Dev Cron Poller for Local Testing (Triggers scheduler every 30 seconds)
-    const pollerInterval = setInterval(() => {
-      fetch('/api/cron/reminders')
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.foundCount > 0) {
-            console.log(`[DEV CRON POLLER] Scheduler executed: Found=${data.foundCount}, PushSuccess=${data.successPushCount}`);
-          }
-        })
-        .catch(() => {});
-    }, 30000);
+    // 4. Background Dev Cron Poller for Local Testing (Triggers scheduler every 30 seconds in dev mode only)
+    let pollerInterval: NodeJS.Timeout | null = null;
+    if (process.env.NODE_ENV === 'development' && !Capacitor.isNativePlatform() && navigator.onLine) {
+      pollerInterval = setInterval(() => {
+        if (!navigator.onLine) return;
+        fetch('/api/cron/reminders')
+          .then(res => res.ok ? res.json() : null)
+          .then(data => {
+            if (data && data.foundCount > 0) {
+              console.log(`[DEV CRON POLLER] Scheduler executed: Found=${data.foundCount}, PushSuccess=${data.successPushCount}`);
+            }
+          })
+          .catch(() => {});
+      }, 30000);
 
-    // Initial dev trigger immediately on page load
-    fetch('/api/cron/reminders').catch(() => {});
+      // Initial dev trigger immediately on page load if online
+      fetch('/api/cron/reminders').catch(() => {});
+    }
 
     // 5. Service Worker & Native FCM Registration
     const registerNativeFCM = async () => {
-      if (!Capacitor.isNativePlatform()) return;
+      if (!Capacitor.isNativePlatform() || !navigator.onLine) return;
       try {
         const fcmToken = await getNativeFCMToken();
         if (fcmToken) {
@@ -88,7 +92,7 @@ export default function ServiceWorkerRegistration() {
     }
 
     if (!('serviceWorker' in navigator)) {
-      return () => clearInterval(pollerInterval);
+      return () => { if (pollerInterval) clearInterval(pollerInterval); };
     }
 
     const registerSW = async () => {
@@ -101,7 +105,7 @@ export default function ServiceWorkerRegistration() {
         registration.update().catch(() => {});
 
         // Auto-sync Web Push / FCM subscription for ALL devices (PC, Android, etc.)
-        if ('PushManager' in window && 'Notification' in window) {
+        if ('PushManager' in window && 'Notification' in window && navigator.onLine && !Capacitor.isNativePlatform()) {
           let currentPerm = Notification.permission;
           if (currentPerm === 'default') {
             try {

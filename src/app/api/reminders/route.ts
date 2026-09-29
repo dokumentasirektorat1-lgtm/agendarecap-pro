@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
 
-export const dynamic = 'force-static';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 
 function getAdminClient() {

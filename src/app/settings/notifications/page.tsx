@@ -198,13 +198,15 @@ export default function NotificationSettingsPage() {
     }
 
     // 5. Supabase connection check
-    if (navigator.onLine) {
+    if (navigator.onLine && !isNativePlatform()) {
       try {
         const res = await fetch('/api/reminders', { method: 'HEAD' });
         setSupabaseStatus(res.ok ? "CONNECTED" : "OFFLINE / SERVER ERROR");
       } catch (e) {
         setSupabaseStatus("OFFLINE");
       }
+    } else if (isNativePlatform()) {
+      setSupabaseStatus(navigator.onLine ? "CONNECTED (NATIVE)" : "OFFLINE");
     } else {
       setSupabaseStatus("OFFLINE");
     }

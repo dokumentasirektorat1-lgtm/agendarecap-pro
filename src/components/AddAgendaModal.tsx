@@ -4,6 +4,8 @@ import { X, MapPin } from "lucide-react";
 import { useStore, Agenda } from "@/store/useStore";
 import { format } from "date-fns";
 
+import { AgendaTimeMode, getAgendaTimeMode } from "@/lib/agenda-time";
+
 interface AddAgendaModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -18,6 +20,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
   const [notes, setNotes] = useState("");
   const [includeNotes, setIncludeNotes] = useState(false);
   const [time, setTime] = useState("09:00");
+  const [timeMode, setTimeMode] = useState<AgendaTimeMode>("exact");
 
   // New fields
   const [status, setStatus] = useState<'confirmed' | 'pending_consultation' | 'rescheduled' | 'cancelled' | 'unscheduled'>('confirmed');
@@ -29,6 +32,12 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
   const [endDate, setEndDate] = useState<Date>(defaultDate);
   const [multiDateTimes, setMultiDateTimes] = useState<Record<string, string>>({});
 
+  // Recurring Weekly fields (Sections 5 & 6)
+  const [isRecurringWeekly, setIsRecurringWeekly] = useState(false);
+  const [selectedDays, setSelectedDays] = useState<number[]>([1]);
+  const [recurrenceStartDate, setRecurrenceStartDate] = useState(format(defaultDate, "yyyy-MM-dd"));
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState(format(new Date(defaultDate.getTime() + 90 * 24 * 60 * 60 * 1000), "yyyy-MM-dd"));
+
   // Online Meeting fields
   const [isOnline, setIsOnline] = useState(false);
   const [onlineLink, setOnlineLink] = useState("");
@@ -36,6 +45,9 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
   const [meetingPasscode, setMeetingPasscode] = useState("");
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Selected Target Date for creation or reschedule
+  const [selectedDateStr, setSelectedDateStr] = useState<string>(format(defaultDate, "yyyy-MM-dd"));
 
   useEffect(() => {
     if (isOpen) {
@@ -45,10 +57,33 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
         setNotes(editAgenda.notes || "");
         setPrivateNotes(editAgenda.privateNotes || "");
         setIncludeNotes(editAgenda.include_notes_in_share);
-        setTime(format(new Date(editAgenda.scheduled_at), "HH:mm"));
-        setStatus(editAgenda.status || 'confirmed');
+        
+        if (editAgenda.scheduled_at) {
+          try {
+            setSelectedDateStr(format(new Date(editAgenda.scheduled_at), "yyyy-MM-dd"));
+          } catch {
+            setSelectedDateStr(format(defaultDate, "yyyy-MM-dd"));
+          }
+        } else {
+          setSelectedDateStr(format(defaultDate, "yyyy-MM-dd"));
+        }
+
+        const mode = getAgendaTimeMode(editAgenda);
+        setTimeMode(mode);
+        if (mode === 'exact' && editAgenda.scheduled_at) {
+          try {
+            setTime(format(new Date(editAgenda.scheduled_at), "HH:mm"));
+          } catch {
+            setTime("09:00");
+          }
+        } else {
+          setTime("09:00");
+        }
+
+        setStatus(editAgenda.status || (mode === 'unscheduled' ? 'unscheduled' : 'confirmed'));
         setIsShareable(editAgenda.isShareable ?? true);
         setIsMultiDay(false);
+        setIsRecurringWeekly(false);
         setIsOnline(editAgenda.isOnline || false);
         setOnlineLink(editAgenda.onlineLink || "");
         setMeetingId(editAgenda.meetingId || "");
@@ -59,10 +94,16 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
         setNotes("");
         setPrivateNotes("");
         setIncludeNotes(false);
+        setSelectedDateStr(format(defaultDate, "yyyy-MM-dd"));
         setTime("09:00");
+        setTimeMode("exact");
         setStatus('confirmed');
         setIsShareable(true);
         setIsMultiDay(false);
+        setIsRecurringWeekly(false);
+        setSelectedDays([1]);
+        setRecurrenceStartDate(format(defaultDate, "yyyy-MM-dd"));
+        setRecurrenceEndDate(format(new Date(defaultDate.getTime() + 90 * 24 * 60 * 60 * 1000), "yyyy-MM-dd"));
         setEndDate(defaultDate);
         setMultiDateTimes({});
         setIsOnline(false);
@@ -90,6 +131,15 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
     }
   }, [isMultiDay, defaultDate, endDate]);
 
+  const handleTimeModeChange = (mode: AgendaTimeMode) => {
+    setTimeMode(mode);
+    if (mode === 'unscheduled') {
+      setStatus('unscheduled');
+    } else if (status === 'unscheduled') {
+      setStatus('confirmed');
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !location) return;
@@ -98,10 +148,16 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
     let success = true;
 
     try {
+      const effectiveStatus = timeMode === 'unscheduled' ? 'unscheduled' : (status === 'unscheduled' ? 'confirmed' : status);
+
       if (editAgenda) {
-        const scheduledDate = new Date(editAgenda.scheduled_at);
-        const [hours, minutes] = time.split(":").map(Number);
-        scheduledDate.setHours(hours, minutes, 0, 0);
+        const scheduledDate = new Date(selectedDateStr + 'T00:00:00');
+        if (timeMode === 'exact') {
+          const [hours, minutes] = time.split(":").map(Number);
+          scheduledDate.setHours(hours, minutes, 0, 0);
+        } else {
+          scheduledDate.setHours(0, 0, 0, 0);
+        }
 
         success = await updateAgenda(editAgenda.id, {
           title,
@@ -110,28 +166,30 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
           privateNotes,
           include_notes_in_share: includeNotes,
           scheduled_at: scheduledDate.toISOString(),
-          status,
+          time_mode: timeMode,
+          status: effectiveStatus,
           isShareable,
           isOnline,
           onlineLink,
           meetingId,
           meetingPasscode
         });
-      } else {
-        if (isMultiDay) {
-          const groupId = crypto.randomUUID?.() || Date.now().toString();
-          
-          let curr = new Date(defaultDate);
-          curr.setHours(0,0,0,0);
-          const end = new Date(endDate);
-          end.setHours(0,0,0,0);
+      } else if (isRecurringWeekly) {
+        // Section 5 & 6: Recurring Weekly Agenda Generation over Active Semester Range
+        const groupId = crypto.randomUUID?.() || Date.now().toString();
+        let curr = new Date(recurrenceStartDate + 'T00:00:00');
+        const end = new Date(recurrenceEndDate + 'T23:59:59');
 
-          while (curr <= end) {
-            const key = format(curr, 'yyyy-MM-dd');
-            const dayTime = multiDateTimes[key] || "09:00";
-            const [hours, minutes] = dayTime.split(":").map(Number);
+        while (curr <= end) {
+          const dayOfWeek = curr.getDay(); // 0 = Sun, 1 = Mon...
+          if (selectedDays.includes(dayOfWeek)) {
             const scheduledDate = new Date(curr);
-            scheduledDate.setHours(hours, minutes, 0, 0);
+            if (timeMode === 'exact') {
+              const [hours, minutes] = time.split(":").map(Number);
+              scheduledDate.setHours(hours, minutes, 0, 0);
+            } else {
+              scheduledDate.setHours(0, 0, 0, 0);
+            }
 
             const res = await addAgenda({
               title,
@@ -140,7 +198,48 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
               privateNotes,
               include_notes_in_share: includeNotes,
               scheduled_at: scheduledDate.toISOString(),
-              status,
+              time_mode: timeMode,
+              status: effectiveStatus,
+              isShareable,
+              groupId,
+              isOnline,
+              onlineLink,
+              meetingId,
+              meetingPasscode
+            });
+            if (!res) success = false;
+          }
+          curr.setDate(curr.getDate() + 1);
+        }
+      } else {
+        if (isMultiDay) {
+          const groupId = crypto.randomUUID?.() || Date.now().toString();
+          
+          let curr = new Date(selectedDateStr + 'T00:00:00');
+          curr.setHours(0,0,0,0);
+          const end = new Date(endDate);
+          end.setHours(0,0,0,0);
+
+          while (curr <= end) {
+            const key = format(curr, 'yyyy-MM-dd');
+            const dayTime = multiDateTimes[key] || "09:00";
+            const scheduledDate = new Date(curr);
+            if (timeMode === 'exact') {
+              const [hours, minutes] = dayTime.split(":").map(Number);
+              scheduledDate.setHours(hours, minutes, 0, 0);
+            } else {
+              scheduledDate.setHours(0, 0, 0, 0);
+            }
+
+            const res = await addAgenda({
+              title,
+              location,
+              notes,
+              privateNotes,
+              include_notes_in_share: includeNotes,
+              scheduled_at: scheduledDate.toISOString(),
+              time_mode: timeMode,
+              status: effectiveStatus,
               isShareable,
               groupId,
               isOnline,
@@ -152,9 +251,13 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
             curr.setDate(curr.getDate() + 1);
           }
         } else {
-          const scheduledDate = new Date(defaultDate);
-          const [hours, minutes] = time.split(":").map(Number);
-          scheduledDate.setHours(hours, minutes, 0, 0);
+          const scheduledDate = new Date(selectedDateStr + 'T00:00:00');
+          if (timeMode === 'exact') {
+            const [hours, minutes] = time.split(":").map(Number);
+            scheduledDate.setHours(hours, minutes, 0, 0);
+          } else {
+            scheduledDate.setHours(0, 0, 0, 0);
+          }
 
           success = await addAgenda({
             title,
@@ -163,7 +266,8 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
             privateNotes,
             include_notes_in_share: includeNotes,
             scheduled_at: scheduledDate.toISOString(),
-            status,
+            time_mode: timeMode,
+            status: effectiveStatus,
             isShareable,
             isOnline,
             onlineLink,
@@ -226,23 +330,110 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
 
               <div className="flex flex-col gap-4">
                 {!editAgenda && (
-                  <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => setIsMultiDay(!isMultiDay)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        isMultiDay ? "bg-purple-500" : "bg-zinc-600"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          isMultiDay ? "translate-x-6" : "translate-x-1"
+                  <>
+                    <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsMultiDay(!isMultiDay);
+                          if (!isMultiDay) setIsRecurringWeekly(false);
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          isMultiDay ? "bg-purple-500" : "bg-zinc-600"
                         }`}
-                      />
-                    </button>
-                    <span className="text-sm font-medium text-zinc-300">
-                      Agenda Multi-Hari
-                    </span>
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            isMultiDay ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                      <span className="text-sm font-medium text-zinc-300">
+                        Agenda Multi-Hari
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 p-3 bg-white/5 border border-white/10 rounded-xl">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsRecurringWeekly(!isRecurringWeekly);
+                          if (!isRecurringWeekly) setIsMultiDay(false);
+                        }}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          isRecurringWeekly ? "bg-indigo-500" : "bg-zinc-600"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            isRecurringWeekly ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                      <span className="text-sm font-medium text-zinc-300">
+                        Ulangi Setiap Minggu (Periode Semester)
+                      </span>
+                    </div>
+                  </>
+                )}
+
+                {/* Recurring Weekly Controls (Section 5 & 6) */}
+                {isRecurringWeekly && !editAgenda && (
+                  <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-xl space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-indigo-300 mb-2 uppercase tracking-wider">
+                        Pilih Hari Berulang
+                      </label>
+                      <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                        {[
+                          { id: 1, label: "Sen" },
+                          { id: 2, label: "Sel" },
+                          { id: 3, label: "Rab" },
+                          { id: 4, label: "Kam" },
+                          { id: 5, label: "Jum" },
+                          { id: 6, label: "Sab" },
+                          { id: 0, label: "Min" }
+                        ].map(day => (
+                          <button
+                            key={day.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedDays(prev => 
+                                prev.includes(day.id) ? prev.filter(d => d !== day.id) : [...prev, day.id]
+                              );
+                            }}
+                            className={`py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                              selectedDays.includes(day.id)
+                                ? "bg-indigo-500 text-white border-indigo-400 shadow-md"
+                                : "bg-black/30 text-zinc-400 border-white/10 hover:text-white"
+                            }`}
+                          >
+                            {day.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pt-1">
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-300 mb-1">Periode Mulai</label>
+                        <input
+                          type="date"
+                          value={recurrenceStartDate}
+                          onChange={(e) => setRecurrenceStartDate(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 [color-scheme:dark]"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-zinc-300 mb-1">Periode Selesai</label>
+                        <input
+                          type="date"
+                          value={recurrenceEndDate}
+                          onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 [color-scheme:dark]"
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -278,7 +469,79 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
                   </div>
                 )}
 
-                <div className="flex gap-4">
+                {/* Time Semantics Selector */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-400 mb-1.5">Semantik Waktu</label>
+                  <div className="grid grid-cols-2 gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => handleTimeModeChange('exact')}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                        timeMode === 'exact'
+                          ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-sm'
+                          : 'bg-white/5 text-zinc-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      Jam Tertentu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTimeModeChange('flex')}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                        timeMode === 'flex'
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/50 shadow-sm'
+                          : 'bg-white/5 text-zinc-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      Fleksibel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTimeModeChange('all_day')}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                        timeMode === 'all_day'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm'
+                          : 'bg-white/5 text-zinc-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      Seharian
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTimeModeChange('unscheduled')}
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all border ${
+                        timeMode === 'unscheduled'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
+                          : 'bg-white/5 text-zinc-400 border-white/10 hover:text-white'
+                      }`}
+                    >
+                      Belum Ditentukan
+                    </button>
+                  </div>
+                </div>
+
+                {!isMultiDay && (
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-400 mb-1.5 flex items-center gap-1">
+                      Tanggal Agenda {timeMode === 'unscheduled' && <span className="text-xs text-amber-400 font-normal">(Atur Tanggal untuk Menjadwalkan)</span>}
+                    </label>
+                    <input
+                      type="date"
+                      required={timeMode !== 'unscheduled'}
+                      value={selectedDateStr}
+                      onChange={(e) => {
+                        setSelectedDateStr(e.target.value);
+                        if (timeMode === 'unscheduled') {
+                          setTimeMode('exact');
+                          setStatus('confirmed');
+                        }
+                      }}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all [color-scheme:dark]"
+                    />
+                  </div>
+                )}
+
+                <div className="flex gap-4 items-end">
                   <div className="flex-1">
                     <label className="block text-sm font-medium text-zinc-400 mb-1.5 flex items-center gap-1">
                       <MapPin className="w-4 h-4" /> Tempat <span className="text-red-400">*</span>
@@ -292,9 +555,9 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                     />
                   </div>
-                  {!isMultiDay && (
+                  {timeMode === 'exact' && !isMultiDay && (
                     <div className="w-1/3">
-                      <label className="block text-sm font-medium text-zinc-400 mb-1.5">Waktu</label>
+                      <label className="block text-sm font-medium text-zinc-400 mb-1.5">Jam</label>
                       <input
                         type="time"
                         required

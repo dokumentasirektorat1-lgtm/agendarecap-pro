@@ -717,15 +717,24 @@ export class SyncRepository {
         const nowMs = Date.now();
 
         // A. Agendas Reconciliation
-        const { data: remoteAgendas, error: agendaFetchError } = await supabase
-          .from('agendas')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('scheduled_at', { ascending: true });
+        let remoteAgendas: any[] | null = null;
+        try {
+          const { data, error: agendaFetchError } = await supabase
+            .from('agendas')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('scheduled_at', { ascending: true });
 
-        if (agendaFetchError) {
-          console.warn('[SYNC ENGINE] Fetch remote agendas error:', agendaFetchError);
-        } else if (remoteAgendas && Array.isArray(remoteAgendas)) {
+          if (agendaFetchError) {
+            console.warn('[SYNC ENGINE] Fetch remote agendas error:', agendaFetchError);
+          } else {
+            remoteAgendas = data;
+          }
+        } catch (agErr: any) {
+          console.warn('[SYNC ENGINE] Fetch remote agendas network notice:', agErr?.message || agErr);
+        }
+
+        if (remoteAgendas && Array.isArray(remoteAgendas)) {
           const localAgendas = await getAgendasFromIDB();
           const agendaMap = new Map<string, IDBAgenda>();
           localAgendas.forEach(a => agendaMap.set(a.id, a));
@@ -765,15 +774,22 @@ export class SyncRepository {
         }
 
         // B. Reminders & Occurrences Reconciliation
-        const { data: remoteReminders, error: reminderFetchError } = await supabase
-          .from('reminders')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('created_at', { ascending: false });
+        let remoteReminders: any[] | null = null;
+        try {
+          const { data, error: reminderFetchError } = await supabase
+            .from('reminders')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('created_at', { ascending: false });
 
-        if (reminderFetchError) {
-          const sErr = serializeSupabaseError(reminderFetchError);
-          console.warn('[SYNC REMINDERS ERROR]', sErr);
+          if (reminderFetchError) {
+            const sErr = serializeSupabaseError(reminderFetchError);
+            console.warn('[SYNC REMINDERS ERROR]', sErr);
+          } else {
+            remoteReminders = data;
+          }
+        } catch (remErr: any) {
+          console.warn('[SYNC ENGINE] Fetch remote reminders network notice:', remErr?.message || remErr);
         }
 
         console.log('[SYNC OCCURRENCES AUTH]', {
@@ -785,15 +801,19 @@ export class SyncRepository {
         let occFetchError: any = null;
 
         if (remoteReminders && Array.isArray(remoteReminders) && remoteReminders.length > 0) {
-          const reminderIds = remoteReminders.map((r: any) => r.id);
-          const res = await supabase
-            .from('reminder_occurrences')
-            .select('*')
-            .in('reminder_id', reminderIds)
-            .order('scheduled_at', { ascending: true });
+          try {
+            const reminderIds = remoteReminders.map((r: any) => r.id);
+            const res = await supabase
+              .from('reminder_occurrences')
+              .select('*')
+              .in('reminder_id', reminderIds)
+              .order('scheduled_at', { ascending: true });
 
-          remoteOccurrences = res.data || [];
-          occFetchError = res.error;
+            remoteOccurrences = res.data || [];
+            occFetchError = res.error;
+          } catch (occErr: any) {
+            console.warn('[SYNC ENGINE] Fetch remote occurrences network notice:', occErr?.message || occErr);
+          }
         }
 
         if (occFetchError) {

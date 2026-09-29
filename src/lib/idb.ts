@@ -11,6 +11,7 @@ export interface IDBAgenda {
   location: string;
   notes?: string;
   scheduled_at: string;
+  time_mode?: 'exact' | 'flex' | 'all_day' | 'unscheduled';
   privateNotes?: string;
   is_completed: boolean;
   include_notes_in_share: boolean;

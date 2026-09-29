@@ -90,7 +90,7 @@ export default function RemindersPage() {
   }, [fetchReminders]);
 
   const syncPushSubscription = async (forceReRegister = false) => {
-    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+    if (typeof navigator === 'undefined' || !('serviceWorker' in navigator) || !navigator.onLine) return;
 
     try {
       const reg = await navigator.serviceWorker.ready;
@@ -122,7 +122,7 @@ export default function RemindersPage() {
         });
       }
 
-      if (subscription) {
+      if (subscription && navigator.onLine) {
         setSubscriptionActive(true);
         await fetch('/api/push/subscribe', {
           method: 'POST',
@@ -134,7 +134,7 @@ export default function RemindersPage() {
               platform: navigator.platform
             }
           })
-        });
+        }).catch(() => {});
       }
     } catch (err: any) {
       console.error("[REMINDER] Failed to sync push subscription:", err);
@@ -162,6 +162,14 @@ export default function RemindersPage() {
   };
 
   const handleTriggerCronServer = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      Swal.fire({
+        icon: 'warning',
+        title: 'Perangkat Offline',
+        text: 'Tidak dapat menghubungkan ke scheduler server saat offline.'
+      });
+      return;
+    }
     setIsTestingCron(true);
     try {
       const res = await fetch('/api/cron/reminders?manual=true');

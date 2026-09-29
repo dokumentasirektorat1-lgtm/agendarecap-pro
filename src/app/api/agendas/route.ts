@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createClient as createServerSupabase } from '@/lib/supabase/server';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 
-export const dynamic = 'force-static';
 
 function getAdminClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
@@ -54,6 +53,7 @@ export async function POST(request: Request) {
       title,
       location,
       scheduled_at,
+      time_mode,
       notes,
       privateNotes,
       status,
@@ -66,8 +66,8 @@ export async function POST(request: Request) {
       groupId
     } = body;
 
-    if (!title || !scheduled_at) {
-      return NextResponse.json({ error: 'Title and scheduled_at are required' }, { status: 400 });
+    if (!title || (!scheduled_at && status !== 'unscheduled' && time_mode !== 'unscheduled')) {
+      return NextResponse.json({ error: 'Title and scheduled_at are required for scheduled agendas' }, { status: 400 });
     }
 
     const now = new Date().toISOString();
@@ -76,7 +76,8 @@ export async function POST(request: Request) {
       user_id: user?.id || body.user_id,
       title: title.trim(),
       location: location || '',
-      scheduled_at,
+      scheduled_at: scheduled_at || now,
+      time_mode: time_mode || (status === 'unscheduled' ? 'unscheduled' : 'exact'),
       notes: notes || '',
       privateNotes: privateNotes || '',
       status: status || 'confirmed',

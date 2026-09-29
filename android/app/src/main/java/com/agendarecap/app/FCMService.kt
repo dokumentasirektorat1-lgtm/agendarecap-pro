@@ -63,7 +63,7 @@ class FCMService : FirebaseMessagingService() {
                 lightColor = Color.BLUE
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500)
-                setSound(soundUri, audioAttributes)
+                setSound(channelInfo.soundUri, audioAttributes)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
 
