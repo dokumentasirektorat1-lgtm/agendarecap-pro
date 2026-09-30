@@ -1,0 +1,1270 @@
+<USER_REQUEST>
+# AGENDARECAP PRO — LOCAL REPOSITORY AUDIT & IMPLEMENTATION
+
+## MODE KERJA WAJIB: SOURCE OF TRUTH = REPO GIT LOKAL
+
+Kamu bekerja pada project **AgendaRecap Pro** menggunakan **repo Git lokal yang sedang terbuka/tersedia di environment Antigravity**.
+
+## ATURAN PALING PENTING
+
+1. **Jangan menggunakan GitHub, Vercel, deployment online, atau source online sebagai source of truth.**
+2. Chat history dari versi Antigravity sebelumnya sudah hilang, sehingga **jangan mengandalkan asumsi dari percakapan sebelumnya**.
+3. Semua implementasi, schema, komponen, migration, native Android code, utility, route, dan konfigurasi harus **diaudit langsung dari repository lokal saat ini**.
+4. Sebelum mengubah kode, lakukan audit source secara menyeluruh untuk menemukan:
+
+   * implementasi yang sudah ada;
+   * implementasi setengah jadi;
+   * fitur yang hanya terlihat di UI tetapi belum benar-benar bekerja;
+   * fitur yang sudah bekerja dan wajib dipertahankan;
+   * dependency antarfitur;
+   * potensi regresi.
+5. Jangan membuat implementasi berdasarkan asumsi. **Temukan dulu file, function, component, hook, repository, API route, native class, schema, dan flow aktualnya.**
+6. Jangan melakukan refactor besar yang tidak diperlukan.
+7. Jangan menghapus fitur lama yang sudah bekerja hanya karena arsitekturnya menurutmu bisa dibuat lebih bagus.
+8. Setiap perubahan harus kompatibel dengan:
+
+   * Web/PWA;
+   * Android Native Capacitor;
+   * offline/local-first;
+   * Supabase synchronization;
+   * existing reminder system.
+9. **Reminder system adalah protected functionality. Jangan merusaknya.**
+
+---
+
+# 0. AUDIT AWAL WAJIB
+
+Sebelum coding lakukan audit lengkap.
+
+Periksa minimal:
+
+### Frontend
+
+* seluruh `src/`
+* dashboard
+* agenda page
+* agenda editor
+* consultation page
+* settings
+* export components
+* share page
+* diagnostics
+* notification/reminder components
+* widget-related UI
+* service worker
+* IndexedDB/local repository
+* sync repository
+* hooks/store
+
+### Backend
+
+* API routes
+* Supabase access layer
+* migrations/schema
+* RPC
+* RLS
+* synchronization mechanism
+* sharing mechanism
+* export generation
+
+### Native Android
+
+Audit aktual:
+
+* `android/`
+* `AndroidManifest`
+* `MainActivity`
+* notification service
+* AlarmManager
+* BroadcastReceiver
+* FCM
+* custom sound
+* widget provider
+* widget storage
+* boot recovery
+* Capacitor bridge/plugin
+
+### Build
+
+Periksa:
+
+* `package.json`
+* `next.config`
+* Capacitor config
+* native build script
+* TypeScript config
+* PWA/service worker
+* environment configuration
+
+---
+
+# 1. PROTECTED REMINDER REGRESSION TEST
+
+SEBELUM membuat perubahan fitur baru, cari dan pahami implementasi reminder yang saat ini sudah bekerja.
+
+Reminder yang wajib dipertahankan:
+
+* create reminder
+* update reminder
+* delete reminder
+* activate/deactivate
+* reschedule
+* native AlarmManager
+* notification
+* custom notification sound
+* snooze 5 menit
+* snooze 15 menit
+* complete/close
+* web push
+* Web → Android
+* Android → Web
+* offline/reconnect
+* background
+* app killed
+* reboot
+* duplicate prevention
+* cross-device synchronization
+
+### ATURAN
+
+Jangan mengubah reminder architecture kecuali memang diperlukan langsung oleh fitur custom sound.
+
+Setelah setiap perubahan besar, lakukan regression test reminder.
+
+Jika ditemukan reminder regression:
+
+**STOP mengerjakan fitur baru.**
+
+Perbaiki regression terlebih dahulu sampai PASS.
+
+---
+
+# 2. EXPORT PDF — STATUS + SEMANTIC COLOR + EMPTY DATE RULE
+
+Audit implementasi PDF export yang sekarang.
+
+Pertahankan layout dan style PDF yang sudah baik, kemudian tingkatkan.
+
+## Status agenda
+
+Hasil PDF harus mempunyai kolom:
+
+**Status**
+
+Status harus berasal dari status agenda aktual yang digunakan aplikasi.
+
+Jangan membuat enum status baru tanpa audit schema terlebih dahulu.
+
+Contoh status yang dapat muncul apabila memang tersedia pada source:
+
+* Terkonfirmasi
+* Pending Konsultasi
+* Cancel
+* status lain yang memang sudah digunakan aplikasi
+
+Gunakan **label status yang sebenarnya digunakan aplikasi**, bukan contoh di atas sebagai enum baru.
+
+## Warna berdasarkan status
+
+PDF harus memiliki visual status yang mudah dibedakan.
+
+Minimal:
+
+* agenda normal/terkonfirmasi → warna normal
+* pending konsultasi → warna yang berbeda tetapi tetap profesional
+* cancel → **teks agenda berwarna merah**
+* status lain → gunakan warna yang sesuai dengan semantic status aktual
+
+Jangan menggunakan warna terlalu banyak sampai PDF menjadi ramai.
+
+### Untuk CANCEL
+
+Tidak cukup hanya kolom Status berwarna merah.
+
+Informasi agenda yang dibatalkan harus dapat langsung terlihat sebagai agenda cancel.
+
+Pertahankan keterbacaan tabel.
+
+---
+
+## Empty date pada PDF
+
+Untuk **PDF Export Rentang Waktu**:
+
+Semua tanggal kalender dalam range tetap diproses.
+
+Tetapi ada aturan baru:
+
+### Jangan tampilkan tanggal kosong apabila waktunya sudah terlewat.
+
+Contoh:
+
+Hari ini 30 September.
+
+Tanggal 29 September kosong:
+→ jangan dimasukkan sebagai empty-date block.
+
+Tanggal 1 Oktober kosong:
+→ tetap dimasukkan.
+
+Artinya status "tanggal kosong" harus mempertimbangkan:
+
+**tanggal kosong + tanggal sudah lewat = jangan tampilkan**
+
+**tanggal kosong + tanggal hari ini atau masa depan = tampilkan**
+
+Gunakan timezone aplikasi/user yang aktual.
+
+Jangan menggunakan UTC mentah apabila hasilnya dapat menyebabkan tanggal bergeser.
+
+---
+
+## Empty date grouping
+
+Tanggal kosong yang berurutan boleh digabung.
+
+Contoh:
+
+2 Oktober — kosong
+3 Oktober — kosong
+4 Oktober — kosong
+5 Oktober — kosong
+
+Boleh dirender:
+
+**2–5 Oktober 2026 — 4 hari belum memiliki Agenda**
+
+Tetapi:
+
+2 Oktober kosong
+3 Oktober ada agenda
+4 Oktober kosong
+
+HARUS menjadi dua blok terpisah.
+
+Jangan menggabungkan non-consecutive empty dates.
+
+Tanggal kosong juga harus terlihat jelas tetapi tidak membuat PDF terlalu penuh.
+
+---
+
+## UNSCHEDULED
+
+Agenda UNSCHEDULED:
+
+* jangan diberi tanggal palsu;
+* jangan diberi jam 00:00;
+* jangan masuk ke empty-date calculation;
+* tampil sebagai section terpisah:
+
+**Belum Ada Tanggal**
+
+Gunakan data aktual dari schema.
+
+---
+
+# 3. PDF FULL AGENDA
+
+Pertahankan:
+
+**Export Full Agenda**
+
+Full Agenda harus mencakup seluruh Agenda yang relevan menurut aturan aplikasi.
+
+UNSCHEDULED tetap sebagai section terpisah.
+
+Status tetap tampil.
+
+Status color tetap berlaku.
+
+Jangan memasukkan field:
+
+* Status lama yang bukan status agenda aktual;
+* Catatan internal jika field tersebut memang sebelumnya diminta tidak ditampilkan.
+
+Tetap audit field aktual sebelum menentukan kolom PDF final.
+
+---
+
+# 4. EXPORT EXCEL → EVALUASI SEBAGAI WORD + BACKUP DATA
+
+Audit fungsi export Excel yang sekarang.
+
+Pisahkan dua kebutuhan yang saat ini tercampur:
+
+### A. Human-readable document export
+
+User ingin hasil yang lebih cocok untuk dokumen daripada spreadsheet.
+
+Audit apakah paling aman dan realistis mengubah export agenda menjadi:
+
+**Microsoft Word (.docx)**
+
+Dokumen Word harus mengikuti struktur visual PDF:
+
+* judul
+* periode
+* group berdasarkan tanggal
+* tabel agenda
+* status
+* warna semantic status
+* UNSCHEDULED section
+* empty dates sesuai aturan PDF
+* layout profesional
+* tabel tidak rusak saat berpindah halaman
+
+### Tabel Word harus diperlakukan sebagai satu kesatuan logis.
+
+Artinya:
+
+* jangan membuat kolom header terpisah dari tabel;
+* jangan membuat satu row terpotong secara buruk;
+* gunakan properti DOCX yang mencegah row terpecah ketika memungkinkan;
+* header tabel dapat diulang pada halaman berikutnya;
+* gunakan landscape apabila diperlukan;
+* wrapping text harus aman.
+
+Tetap pertahankan PDF sebagai format utama yang sudah ada.
+
+Jangan memaksakan DOCX jika library/project saat ini tidak mendukung dengan aman.
+
+Jika DOCX benar-benar tidak feasible dalam architecture sekarang, gunakan format dokumen terbaik yang didukung repository dan dokumentasikan alasannya.
+
+---
+
+# 5. EXPORT EXCEL DIUBAH MENJADI BACKUP DATA AGENDA
+
+Fungsi "Export Excel" untuk kebutuhan backup harus diubah konsepnya menjadi:
+
+**Backup Data Agenda**
+
+Ini bukan lagi sekadar laporan.
+
+Tujuannya:
+
+> user dapat menyimpan backup data agenda sehingga data dapat dipulihkan jika suatu saat aplikasi mengalami error.
+
+Audit schema aktual dan tentukan format backup yang paling aman.
+
+Prioritas:
+
+1. format terstruktur;
+2. mudah diimport kembali;
+3. mempertahankan UUID;
+4. mempertahankan seluruh field penting;
+5. mempertahankan relasi;
+6. mempertahankan time semantics;
+7. mempertahankan recurrence jika sudah tersedia;
+8. mempertahankan status;
+9. mempertahankan consultation relationship bila memang ada;
+10. tidak menyebabkan duplicate record saat restore.
+
+Format yang cocok boleh berupa:
+
+* JSON terstruktur;
+* ZIP berisi JSON;
+* atau format lain yang benar-benar didukung architecture.
+
+Jangan memilih Excel hanya karena sebelumnya fungsi bernama Excel.
+
+---
+
+# 6. IMPORT BACKUP DATA AGENDA
+
+Karena Backup Data Agenda adalah untuk recovery, maka harus ada fitur:
+
+**Import Data Agenda**
+
+Audit halaman web yang paling tepat untuk menempatkan fitur ini.
+
+Import minimal harus mampu:
+
+* memilih file backup;
+* memvalidasi format;
+* menampilkan ringkasan data sebelum import;
+* mendeteksi malformed data;
+* mendeteksi duplicate UUID;
+* mendeteksi konflik;
+* tidak langsung menimpa data tanpa kontrol;
+* menyediakan hasil import yang jelas.
+
+### Sangat penting
+
+UUID Agenda harus dipertahankan.
+
+Jika Agenda dengan UUID yang sama sudah ada:
+
+jangan membuat Agenda baru.
+
+Gunakan strategi conflict handling yang aman berdasarkan field dan timestamp aktual.
+
+Jangan menciptakan duplicate hanya karena import dilakukan lebih dari sekali.
+
+Import harus aman untuk:
+
+**backup → reset/recovery → import kembali**
+
+Audit apakah Reminder, Consultation, dan entitas lain perlu ikut dalam backup.
+
+Jangan mengklaim backup "lengkap" jika hanya Agenda yang dibackup.
+
+Label UI harus menjelaskan scope backup yang sebenarnya.
+
+---
+
+# 7. CUSTOM NOTIFICATION SOUND — NATIVE ONLY
+
+Custom notification sound difokuskan pada:
+
+**Android Native**
+
+Jangan memaksakan custom sound ke browser jika browser memang tidak mendukung kontrol tersebut secara konsisten.
+
+Audit implementasi native sound yang sekarang.
+
+Jangan menghapus sound architecture yang sudah bekerja.
+
+## Fitur wajib
+
+Native reminder harus memiliki pilihan:
+
+* Default
+* Chime
+* Ringtone
+* Digital
+* Urgent
+* Custom
+
+Jika architecture saat ini sudah mempunyai opsi yang berbeda, sesuaikan dengan opsi aktualnya.
+
+### Tambahkan:
+
+**Notifikasi Suara: ON/OFF**
+
+Ketika OFF:
+
+* reminder tetap muncul;
+* vibration mengikuti setting yang relevan;
+* notification tetap berfungsi;
+* **suara tidak diputar**.
+
+Ketika ON:
+
+* gunakan sound yang dipilih.
+
+---
+
+## Custom sound file
+
+Audit mekanisme file picker saat ini.
+
+Jika memungkinkan secara aman:
+
+* pilih file suara lokal;
+* simpan reference yang stabil;
+* preview;
+* stop preview;
+* gunakan pada notification channel yang sesuai.
+
+Perhatikan karakteristik Android Notification Channel:
+
+Channel yang sudah dibuat tidak selalu dapat diganti sound-nya secara programmatic.
+
+Jangan membuat bug berupa:
+
+user memilih sound baru → UI berubah → notification tetap memainkan sound lama.
+
+Audit strategi channel ID yang sekarang sebelum mengubahnya.
+
+---
+
+## Offline
+
+Custom notification setting harus tetap dapat digunakan ketika Android sedang offline.
+
+Yang ideal:
+
+* sound metadata tersimpan lokal;
+* setting ON/OFF tersimpan lokal;
+* pilihan sound tersimpan lokal;
+* reminder native tetap dapat berbunyi tanpa koneksi internet.
+
+Jika file custom sendiri dapat diakses secara lokal setelah dipilih, jangan membuat sistem bergantung pada Supabase.
+
+Cross-device synchronization untuk custom sound tidak boleh diasumsikan tersedia jika file binary tidak disinkronkan.
+
+---
+
+# 8. CONSULTATION — GABUNG AGENDA YANG DIINPUT BERSAMA
+
+Audit bagaimana Agenda dan Consultation saat ini dibuat.
+
+Masalah:
+
+Beberapa Agenda sering diinput bersamaan karena agenda berlangsung beberapa hari berturut-turut.
+
+Saat ini hasilnya membuat:
+
+Consultation 1
+Consultation 2
+Consultation 3
+Consultation 4
+
+Padahal semuanya merupakan satu proses konsultasi.
+
+## Target
+
+Satu kegiatan konsultasi harus menjadi:
+
+**1 Consultation**
+
+yang dapat memiliki beberapa Agenda terkait.
+
+Jangan hanya melakukan grouping berdasarkan teks judul secara sembarangan.
+
+Audit terlebih dahulu:
+
+* consultation schema;
+* agenda schema;
+* relation;
+* creation flow;
+* edit flow;
+* source of consultation ID;
+* apakah ada batch/create operation.
+
+### Implementasi yang diinginkan
+
+Jika beberapa Agenda dibuat sebagai satu batch konsultasi:
+
+gunakan satu `consultation_id` yang sama.
+
+Kemudian beberapa Agenda menunjuk ke Consultation tersebut.
+
+Contoh konsep:
+
+Consultation A
+
+* Agenda Senin
+* Agenda Selasa
+* Agenda Rabu
+* Agenda Kamis
+
+Tetap satu Consultation.
+
+### Penting
+
+Jangan membuat consultation duplicate hanya karena Agenda berbeda tanggal.
+
+Jika source saat ini belum memiliki mekanisme batch identity, desain berdasarkan architecture aktual.
+
+Jangan mengarang field baru tanpa migration/schema yang benar.
+
+---
+
+# 9. CALENDAR DENSITY BAR — EDIT AGENDA TIDAK BOLEH MENAMBAH HITUNGAN
+
+Audit bug density bar.
+
+Masalah:
+
+Agenda hanya satu atau dua.
+
+Agenda diedit berkali-kali.
+
+Tetapi calendar density bar akhirnya menganggap edit tersebut sebagai Agenda baru.
+
+Akibatnya bar menjadi terlalu penuh.
+
+## Rule
+
+Density calculation harus dihitung dari:
+
+**jumlah Agenda unik berdasarkan canonical Agenda ID**
+
+bukan:
+
+* jumlah offline queue record;
+* jumlah history update;
+* jumlah occurrence;
+* jumlah synchronization event;
+* jumlah mutation;
+* jumlah revision.
+
+### Contoh
+
+Agenda A diedit 5 kali:
+
+hasil density:
+
+**1 Agenda**
+
+bukan 5.
+
+Agenda A + Agenda B:
+
+**2 Agenda**
+
+bukan jumlah mutation.
+
+Audit seluruh sumber data yang digunakan density calculation.
+
+Pastikan:
+
+* UPDATE tidak mengganti UUID;
+* CREATE dan UPDATE tidak menghasilkan duplicate;
+* local cache tidak memiliki duplicate;
+* sync tidak menggandakan entity;
+* deleted/soft-deleted record tidak ikut dihitung;
+* realtime event tidak menambahkan objek baru secara naif.
+
+### Density threshold
+
+Pertahankan target:
+
+* 1 Agenda → ringan
+* 2–3 Agenda → sedang
+* 4 Agenda → tinggi
+* 5+ Agenda → FULL/PADAT
+
+Dan:
+
+**jika terdapat minimal 1 ALL_DAY pada tanggal tersebut → FULL/PADAT**
+
+UNSCHEDULED tidak ikut density tanggal.
+
+---
+
+# 10. NATIVE WIDGET — WAJIB 2 WIDGET
+
+Audit widget Android native yang sekarang.
+
+Jangan hanya mengganti label.
+
+Pastikan datasource dan interactivity benar-benar bekerja.
+
+Saat ini widget lama tidak boleh lagi hanya menampilkan history notification.
+
+Harus menjadi dua widget terpisah.
+
+---
+
+## WIDGET 1 — KONSULTASI
+
+Nama UI dapat disesuaikan dengan branding aplikasi.
+
+Fungsi:
+
+**Widget Konsultasi**
+
+Menampilkan data consultation aktual dari aplikasi.
+
+Bukan notification history.
+
+Bukan data dummy.
+
+Audit datasource consultation yang sebenarnya.
+
+### Requirement:
+
+* interactive;
+* dapat menampilkan consultation yang relevan;
+* data terbaru;
+* tap action;
+* jika ada beberapa Agenda di bawah satu consultation, tampilkan sebagai satu consultation dengan Agenda terkait;
+* mendukung perubahan data;
+* update setelah consultation berubah;
+* update setelah Agenda terkait berubah.
+
+"Real time" harus benar-benar berarti data widget diperbarui ketika data lokal/native berubah.
+
+Jangan mengklaim real-time cloud apabila widget sebenarnya hanya polling.
+
+Untuk offline:
+
+gunakan local/native cache sebagai source yang tersedia.
+
+Ketika online dan sync selesai:
+
+widget harus diperbarui.
+
+---
+
+# 11. WIDGET 2 — AGENDA HARI INI + 1 MINGGU
+
+Widget kedua harus menjadi navigable agenda widget.
+
+Target:
+
+menampilkan:
+
+**Agenda Hari Ini**
+
+dan dapat dinavigasi:
+
+**hari ini → +1 hari → +2 hari → ... → +7 hari**
+
+User harus dapat berpindah tanggal langsung dari Home Screen.
+
+Contoh:
+
+`< 30 Sep  >`
+
+Kemudian list Agenda pada tanggal tersebut.
+
+### Requirement
+
+* interaktif;
+* navigation tanggal;
+* dapat berubah ke hari berikutnya;
+* upto date;
+* update saat Agenda dibuat;
+* update saat Agenda diedit;
+* update saat Agenda dihapus;
+* update saat Agenda di-reschedule;
+* update saat status Agenda berubah;
+* update saat tanggal berganti;
+* bekerja offline menggunakan data lokal/native.
+
+### Agenda time semantics
+
+Gunakan semantics aplikasi yang sebenarnya:
+
+* EXACT → `08:30`
+* FLEX → `Fleksibel`
+* ALL_DAY → `Seharian`
+* UNSCHEDULED → **tidak masuk widget tanggal**
+
+Jangan menampilkan UNSCHEDULED pada tanggal palsu.
+
+---
+
+# 12. WIDGET UPDATE ARCHITECTURE
+
+Jangan membuat widget hanya membaca database satu kali saat widget dibuat.
+
+Audit:
+
+* `WidgetProvider`
+* widget storage
+* native bridge
+* Capacitor plugin
+* local Agenda store
+* synchronization callback
+* Android AppWidget update mechanism
+
+Buat satu jalur update yang jelas:
+
+Agenda change
+→ local repository/store
+→ native widget data update
+→ AppWidget update
+
+Dan ketika sync:
+
+Supabase sync
+→ local repository/store
+→ widget refresh
+
+Tanggal berganti:
+
+system/date check
+→ widget refresh
+→ tampilkan tanggal baru
+
+Hindari polling berlebihan yang menguras battery.
+
+---
+
+# 13. BRANDING
+
+Semua user-facing app title/name harus mengikuti:
+
+**Nama aplikasi yang disimpan melalui Settings**
+
+Audit:
+
+* header
+* dashboard
+* login
+* settings
+* share page
+* PDF
+* Word export
+* backup
+* import
+* notification
+* native UI
+* widget
+* PWA metadata
+* document title
+
+Jangan hardcode "AgendaRecap Pro" pada UI apabila dynamic branding tersedia.
+
+Untuk Android launcher label:
+
+audit apakah runtime rename memang memungkinkan.
+
+Jika hanya dapat dilakukan saat build:
+
+gunakan mekanisme build-time yang aman dan dokumentasikan keterbatasannya.
+
+Jangan merusak package identity hanya untuk mengubah nama.
+
+---
+
+# 14. SHARE PAGE
+
+Jangan menghidupkan kembali konsep banyak link per Agenda.
+
+Gunakan:
+
+**SATU SHARE LINK UNTUK SATU KOLEKSI AGENDA PEMILIK**
+
+Link mewakili semua Agenda yang:
+
+`isShareable = true`
+
+Private Agenda tetap tidak tampil.
+
+Share page:
+
+* tanpa login;
+* read-only;
+* latest data;
+* aman terhadap data private;
+* bukan unrestricted anonymous table access.
+
+---
+
+## Filter
+
+Pada share page harus tersedia:
+
+### Filter tanggal
+
+* Dari
+* Sampai
+
+Range inclusive.
+
+### Search Agenda
+
+Minimal audit field yang aman untuk pencarian:
+
+* judul
+* deskripsi/perihal
+* tempat
+* instansi
+
+Gunakan hanya field yang benar-benar tersedia.
+
+Filter + search harus bekerja:
+
+**AND**
+
+Contoh:
+
+Tanggal range tertentu
+AND
+keyword tertentu.
+
+UNSCHEDULED tetap dapat ditampilkan dalam section:
+
+**Belum Ada Tanggal**
+
+Jangan memberinya tanggal palsu.
+
+---
+
+# 15. EXPORT MENU DASHBOARD
+
+Audit dashboard action menu.
+
+Struktur yang diharapkan:
+
+**EXPORT**
+
+* PDF Full Agenda
+* PDF Rentang Waktu
+* Word / Dokumen Agenda
+* Backup Data Agenda
+
+Kemudian fitur:
+
+**Bagikan Link**
+
+tetap berada di menu share/WhatsApp yang sudah digunakan aplikasi.
+
+Jangan membuat duplicate button Bagikan Link jika functionality tersebut sudah tersedia.
+
+---
+
+# 16. UI DESKTOP
+
+Pada desktop:
+
+Informasi:
+
+**tanggal**
+
+lalu:
+
+**jumlah Agenda hari ini**
+
+harus berada di atas action buttons.
+
+Jangan memaksakan:
+
+tanggal + jumlah agenda + copy + share + export
+
+dalam satu baris sempit.
+
+Pastikan responsive mobile tetap baik.
+
+---
+
+# 17. ERROR HANDLING
+
+Semua fitur baru harus mempunyai error handling yang nyata.
+
+Tidak boleh ada:
+
+* silent failure;
+* button klik tetapi tidak terjadi apa-apa;
+* success toast padahal data gagal;
+* file download kosong;
+* widget tampil tetapi datasource salah;
+* import terlihat sukses tetapi data tidak masuk;
+* native sound setting berubah tetapi sound tidak berubah;
+* consultation duplicate.
+
+Setiap action penting harus memiliki:
+
+loading → success / failed state.
+
+Error harus cukup jelas untuk diagnosis.
+
+---
+
+# 18. TESTING MATRIX
+
+Setelah implementation selesai, jalankan test menyeluruh.
+
+## Agenda
+
+* create
+* update
+* delete
+* reschedule
+* UNSCHEDULED → scheduled
+* scheduled → UNSCHEDULED
+* ALL_DAY
+* FLEX
+* EXACT
+* recurrence jika tersedia
+
+## Consultation
+
+* satu consultation dengan banyak Agenda
+* edit Agenda
+* edit consultation
+* tambah Agenda ke consultation existing
+* jangan duplicate consultation
+
+## Export
+
+### PDF
+
+* normal agenda
+* status
+* cancel red
+* different status colors
+* empty date future
+* empty date past
+* consecutive empty dates
+* non-consecutive empty dates
+* UNSCHEDULED
+
+### Word
+
+* table continuity
+* page break
+* repeated header
+* status styling
+* long text
+* multiple pages
+
+### Backup
+
+* export
+* validate
+* import
+* duplicate UUID
+* re-import same backup
+* malformed backup
+* recovery test
+
+## Calendar density
+
+* 1
+* 2
+* 3
+* 4
+* 5+
+* ALL_DAY
+* edit same Agenda multiple times
+* delete
+* sync duplicate prevention
+
+## Native sound
+
+* sound ON
+* sound OFF
+* default
+* custom
+* preview
+* app closed
+* app killed
+* reboot
+* offline
+
+## Native widgets
+
+### Consultation widget
+
+* initial load
+* update data
+* multiple Agenda / one consultation
+* offline
+* online sync
+* interaction
+
+### Agenda widget
+
+* today
+* tomorrow
+* +7 days
+* previous/next navigation
+* create
+* update
+* delete
+* reschedule
+* date rollover
+* offline
+* sync
+
+## Reminder regression
+
+WAJIB ulangi:
+
+* create
+* update
+* delete
+* snooze 5
+* snooze 15
+* complete
+* native alarm
+* native notification
+* native custom sound
+* sound OFF
+* web push
+* Web → Android
+* Android → Web
+* offline/reconnect
+* app background
+* app killed
+* reboot
+
+---
+
+# 19. BUILD VALIDATION
+
+Jalankan sesuai project sebenarnya:
+
+```bash
+npm run build
+npm run build:native
+npx cap sync android
+cd android
+gradlew assembleDebug
+```
+
+Jika project menggunakan command berbeda, gunakan command aktual dari repository.
+
+Jangan menganggap build PASS hanya karena TypeScript tidak error.
+
+Periksa hasil build secara nyata.
+
+Pastikan native APK benar-benar berisi:
+
+* perubahan PDF/UI
+* Word export
+* Backup/Import
+* consultation grouping
+* density fix
+* custom sound
+* sound OFF
+* widget Consultation
+* widget Agenda 7 hari
+* branding
+* share page
+
+---
+
+# 20. GIT SAFETY
+
+Sebelum coding:
+
+```bash
+git status
+git branch --show-current
+git log -5 --oneline
+```
+
+Jangan checkout branch lain.
+
+Jangan reset user changes.
+
+Jangan melakukan:
+
+```bash
+git reset --hard
+git clean -fd
+```
+
+Jangan menghapus perubahan lokal yang sudah ada.
+
+Sebelum commit:
+
+```bash
+git status
+git diff --stat
+git diff
+```
+
+Review seluruh perubahan.
+
+Pastikan tidak ada file rahasia:
+
+* `.env`
+* credentials
+* service keys
+* private keys
+* debug secrets
+
+masuk commit.
+
+---
+
+# 21. COMMIT LOCAL SAJA
+
+Jika dan hanya jika:
+
+* semua implementation selesai;
+* build PASS;
+* TypeScript PASS;
+* native build PASS;
+* test kritis PASS;
+* reminder regression PASS;
+* tidak ada known blocking error;
+* tidak ada perubahan tidak sengaja;
+
+maka lakukan:
+
+```bash
+git add <file yang memang berubah>
+git commit -m "feat: improve agenda export backup consultation and native widgets"
+```
+
+**JANGAN PUSH.**
+
+Jangan `git push`.
+
+Jangan deploy.
+
+Jangan mengubah remote repository.
+
+Commit harus hanya berada di repository lokal.
+
+---
+
+# 22. FINAL REPORT
+
+Setelah selesai, berikan laporan yang konkret.
+
+Gunakan format:
+
+## SOURCE AUDIT
+
+* branch
+* commit awal
+* file/komponen utama yang diperiksa
+
+## IMPLEMENTED
+
+Jelaskan setiap perubahan dari 1–7.
+
+## TEST RESULT
+
+Untuk setiap fitur:
+
+`PASS` / `FAIL`
+
+Jangan menulis PASS jika hanya compile.
+
+## REMINDER REGRESSION
+
+Berikan hasil setiap test utama.
+
+## BUILD
+
+* npm build
+* native build
+* APK build
+
+## GIT
+
+* commit hash
+* commit message
+* status working tree
+
+## REMAINING ISSUE
+
+Jika ada sesuatu yang belum benar-benar terverifikasi:
+
+tulis secara eksplisit:
+
+**NOT VERIFIED**
+
+Jangan menyebut fitur sebagai selesai jika hanya terlihat benar dari source code.
+
+---
+
+# FINAL RULE
+
+Prioritas pekerjaan:
+
+1. menjaga reminder yang sudah stabil;
+2. audit source lokal;
+3. implementasi berdasarkan architecture aktual;
+4. test nyata;
+5. perbaiki regression;
+6. baru lanjut fitur berikutnya;
+7. commit lokal hanya setelah semuanya PASS.
+
+**Jangan mengejar banyak fitur dengan mengorbankan stabilitas reminder.**
+
+**Jangan menggunakan data dummy untuk menutupi datasource yang belum ditemukan.**
+
+**Jangan mengarang schema, status, relation, atau API yang belum ada tanpa audit dan implementasi lengkap.**
+
+**Jangan menyatakan "sudah work" hanya karena build berhasil.**
+
+Tujuan akhir adalah:
+
+> seluruh fitur yang diminta benar-benar bekerja pada source repository lokal saat ini, tidak menghasilkan duplicate/error, kompatibel dengan offline/native/web, dan reminder yang sudah stabil tetap PASS.
+
+</USER_REQUEST>
+<ADDITIONAL_METADATA>
+The current local time is: 2026-09-30T13:00:10+07:00.
+</ADDITIONAL_METADATA>

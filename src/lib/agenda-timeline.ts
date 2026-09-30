@@ -73,8 +73,8 @@ export function buildTimelineBlocks(
       const count = currentEmptyGroup.length;
 
       const formattedHeader = count === 1
-        ? format(s, "EEEE, d MMMM yyyy", { locale: idLocale }).toUpperCase()
-        : `${format(s, "d MMM", { locale: idLocale })} - ${format(e, "d MMM yyyy", { locale: idLocale })} (${count} HARI KOSONG)`.toUpperCase();
+        ? `${format(s, "EEEE, d MMMM yyyy", { locale: idLocale }).toUpperCase()} — 1 HARI BELUM MEMILIKI AGENDA`
+        : `${format(s, "d MMM", { locale: idLocale })} - ${format(e, "d MMM yyyy", { locale: idLocale })} — ${count} HARI BELUM MEMILIKI AGENDA`.toUpperCase();
 
       timelineBlocks.push({
         type: "EMPTY_DAYS_GROUP",
@@ -90,11 +90,22 @@ export function buildTimelineBlocks(
       currentEmptyGroup = [];
     };
 
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     daysInMonth.forEach(dayDate => {
+      const dayDateNormalized = new Date(dayDate);
+      dayDateNormalized.setHours(0, 0, 0, 0);
+
       const dayAgendas = scheduledAgendas.filter(a => isSameDay(new Date(a.scheduled_at), dayDate));
 
       if (dayAgendas.length === 0) {
-        currentEmptyGroup.push(dayDate);
+        // Do NOT include empty dates that are already in the past (Section 2)
+        if (dayDateNormalized >= today) {
+          currentEmptyGroup.push(dayDate);
+        } else {
+          flushEmptyGroup();
+        }
       } else {
         flushEmptyGroup();
         timelineBlocks.push({

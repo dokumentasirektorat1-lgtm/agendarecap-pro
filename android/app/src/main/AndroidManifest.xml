@@ -63,7 +63,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Home Screen Widget Receiver -->
+        <!-- Home Screen Widget Receiver (Agenda Terdekat) -->
         <receiver
             android:name=".AgendaWidgetProvider"
             android:label="AgendaRecap Terdekat"
@@ -74,6 +74,34 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/agenda_widget_info" />
+        </receiver>
+
+        <!-- Consultation Widget -->
+        <receiver
+            android:name=".ConsultationWidgetProvider"
+            android:label="AgendaRecap Konsultasi"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/consultation_widget_info" />
+        </receiver>
+
+        <!-- Agenda 7 Days Widget -->
+        <receiver
+            android:name=".Agenda7DaysWidgetProvider"
+            android:label="AgendaRecap 7 Hari"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.agendarecap.app.AGENDA7_PREV_DAY" />
+                <action android:name="com.agendarecap.app.AGENDA7_NEXT_DAY" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/agenda_7days_widget_info" />
         </receiver>
 
         <!-- Firebase Cloud Messaging Service -->

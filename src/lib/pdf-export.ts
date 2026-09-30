@@ -17,6 +17,23 @@ export interface PDFExportOptions {
   endDate?: Date;
 }
 
+export function getAgendaStatusLabel(status?: string): string {
+  switch (status) {
+    case 'confirmed':
+      return 'Terkonfirmasi';
+    case 'pending_consultation':
+      return 'Pending Konsultasi';
+    case 'rescheduled':
+      return 'Dijadwal Ulang';
+    case 'cancelled':
+      return 'Dibatalkan';
+    case 'unscheduled':
+      return 'Belum Ada Tanggal';
+    default:
+      return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Terkonfirmasi';
+  }
+}
+
 export function generateAgendaPDF({
   agendas,
   title,
@@ -33,7 +50,7 @@ export function generateAgendaPDF({
     format: "a4"
   });
 
-  const appName = appSettings?.app_name || "AgendaKu";
+  const appName = appSettings?.app_name || "AgendaRecap Pro";
   const docTitle = title || (mode === "range" ? "REKAP AGENDA RENTANG WAKTU" : "REKAP AGENDA SELURUHNYA");
   const exportTimestamp = format(new Date(), "d MMMM yyyy, HH:mm", { locale: idLocale });
 
@@ -84,7 +101,7 @@ export function generateAgendaPDF({
       tableRows.push([
         {
           content: block.formattedHeader,
-          colSpan: 4,
+          colSpan: 5,
           styles: { fillColor: [238, 242, 255], textColor: [49, 46, 129], fontStyle: "bold", halign: "left" }
         }
       ]);
@@ -97,27 +114,43 @@ export function generateAgendaPDF({
           if (agenda.onlineLink) locationText += `\nLink: ${agenda.onlineLink}`;
         }
 
+        const isCancelled = agenda.status === 'cancelled';
+        const isPending = agenda.status === 'pending_consultation';
+        const isRescheduled = agenda.status === 'rescheduled';
+        const statusLabel = getAgendaStatusLabel(agenda.status);
+
+        // Cancelled agendas get prominent RED text throughout row (Section 2)
+        const rowTextColor: [number, number, number] = isCancelled ? [220, 38, 38] : [30, 41, 59];
+        const statusTextColor: [number, number, number] = isCancelled
+          ? [220, 38, 38]
+          : isPending
+          ? [217, 119, 6]
+          : isRescheduled
+          ? [79, 70, 229]
+          : [16, 185, 129];
+
         tableRows.push([
-          (idx + 1).toString(),
-          timeStr,
-          agenda.title,
-          locationText
+          { content: (idx + 1).toString(), styles: { textColor: rowTextColor, halign: "center" as const } },
+          { content: timeStr, styles: { textColor: rowTextColor, halign: "center" as const } },
+          { content: isCancelled ? `[DIBATALKAN] ${agenda.title}` : agenda.title, styles: { textColor: rowTextColor, fontStyle: "bold" } },
+          { content: locationText, styles: { textColor: rowTextColor } },
+          { content: statusLabel, styles: { textColor: statusTextColor, fontStyle: "bold", halign: "center" as const } }
         ]);
       });
     } else if (block.type === "EMPTY_DAYS_GROUP") {
       tableRows.push([
         {
           content: `SLOT KOSONG: ${block.formattedHeader}`,
-          colSpan: 4,
-          styles: { fillColor: [254, 243, 199], textColor: [180, 83, 9], fontStyle: "bold", halign: "left" }
+          colSpan: 5,
+          styles: { fillColor: [254, 243, 199], textColor: [180, 83, 9], fontStyle: "bold", halign: "left" as const }
         }
       ]);
 
       tableRows.push([
-        "-",
-        "Siap Dijadwalkan",
-        { content: block.note, styles: { textColor: [180, 83, 9], fontStyle: "italic" } },
-        "Bisa Direncanakan"
+        { content: "-", styles: { halign: "center" as const } },
+        { content: "Siap Dijadwalkan", styles: { halign: "center" as const, textColor: [180, 83, 9] } },
+        { content: block.note, colSpan: 2, styles: { textColor: [180, 83, 9], fontStyle: "italic" } },
+        { content: "KOSONG", styles: { halign: "center" as const, fontStyle: "bold", textColor: [180, 83, 9] } }
       ]);
     }
   });
@@ -133,8 +166,8 @@ export function generateAgendaPDF({
 
     autoTable(doc, {
       startY: startY + 4,
-      head: [["No", "Waktu / Semantik", "Judul Agenda", "Tempat / Lokasi"]],
-      body: tableRows,
+      head: [["No", "Waktu / Semantik", "Judul Agenda", "Tempat / Lokasi", "Status"]],
+      body: tableRows as any,
       theme: "grid",
       headStyles: {
         fillColor: [79, 70, 229], // Indigo 600
@@ -150,10 +183,11 @@ export function generateAgendaPDF({
         valign: "top"
       },
       columnStyles: {
-        0: { cellWidth: 14, halign: "center" },
-        1: { cellWidth: 40, halign: "center" },
-        2: { cellWidth: 125, fontStyle: "bold" },
-        3: { cellWidth: 90 }
+        0: { cellWidth: 12, halign: "center" },
+        1: { cellWidth: 36, halign: "center" },
+        2: { cellWidth: 110, fontStyle: "bold" },
+        3: { cellWidth: 66 },
+        4: { cellWidth: 45, halign: "center" }
       },
       didDrawPage: (data) => {
         doc.setFontSize(8);
@@ -175,7 +209,7 @@ export function generateAgendaPDF({
     startY = (doc as any).lastAutoTable.finalY + 10;
   }
 
-  // Section II: BELUM ADA TANGGAL (UNSCHEDULED - Section 25)
+  // Section II: BELUM ADA TANGGAL (UNSCHEDULED)
   if (unscheduledAgendas.length > 0) {
     if (startY > 160) {
       doc.addPage();
@@ -188,22 +222,37 @@ export function generateAgendaPDF({
     doc.text(`II. BELUM ADA TANGGAL / UNSCHEDULED (${unscheduledAgendas.length} Agenda)`, 14, startY);
 
     const unscheduledRows = unscheduledAgendas.map((agenda, idx) => {
+      const isCancelled = agenda.status === 'cancelled';
+      const isPending = agenda.status === 'pending_consultation';
+      const isRescheduled = agenda.status === 'rescheduled';
+      const statusLabel = getAgendaStatusLabel(agenda.status);
+      const rowTextColor: [number, number, number] = isCancelled ? [220, 38, 38] : [30, 41, 59];
+      const statusTextColor: [number, number, number] = isCancelled
+        ? [220, 38, 38]
+        : isPending
+        ? [217, 119, 6]
+        : isRescheduled
+        ? [79, 70, 229]
+        : [180, 83, 9];
+
       let locationText = agenda.location || "-";
       if (agenda.isOnline) {
         locationText = `[ONLINE] ${agenda.location || 'Meeting'}`;
       }
+
       return [
-        (idx + 1).toString(),
-        "Belum Ada Tanggal",
-        agenda.title,
-        locationText
+        { content: (idx + 1).toString(), styles: { textColor: rowTextColor, halign: "center" as const } },
+        { content: "Belum Ada Tanggal", styles: { textColor: rowTextColor, halign: "center" as const } },
+        { content: isCancelled ? `[DIBATALKAN] ${agenda.title}` : agenda.title, styles: { textColor: rowTextColor, fontStyle: "bold" } },
+        { content: locationText, styles: { textColor: rowTextColor } },
+        { content: statusLabel, styles: { textColor: statusTextColor, fontStyle: "bold", halign: "center" as const } }
       ];
     });
 
     autoTable(doc, {
       startY: startY + 4,
-      head: [["No", "Waktu / Semantik", "Judul Agenda", "Tempat / Lokasi"]],
-      body: unscheduledRows,
+      head: [["No", "Waktu / Semantik", "Judul Agenda", "Tempat / Lokasi", "Status"]],
+      body: unscheduledRows as any,
       theme: "grid",
       headStyles: {
         fillColor: [217, 119, 6], // Amber 600
@@ -219,10 +268,11 @@ export function generateAgendaPDF({
         valign: "top"
       },
       columnStyles: {
-        0: { cellWidth: 14, halign: "center" },
-        1: { cellWidth: 40, halign: "center" },
-        2: { cellWidth: 125, fontStyle: "bold" },
-        3: { cellWidth: 90 }
+        0: { cellWidth: 12, halign: "center" },
+        1: { cellWidth: 36, halign: "center" },
+        2: { cellWidth: 110, fontStyle: "bold" },
+        3: { cellWidth: 66 },
+        4: { cellWidth: 45, halign: "center" }
       },
       didDrawPage: (data) => {
         doc.setFontSize(8);

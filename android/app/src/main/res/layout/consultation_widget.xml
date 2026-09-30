@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/consultation_widget_container"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="#1C1C1E">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:id="@+id/consultation_widget_title"
+            android:text="AGENDARECAP PRO"
+            android:textColor="#F97316"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.05" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Konsultasi"
+            android:textColor="#A1A1AA"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <!-- Count Badge -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/consultation_count_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0"
+            android:textColor="#F97316"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:paddingEnd="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="konsultasi aktif"
+            android:textColor="#A1A1AA"
+            android:textSize="10sp" />
+    </LinearLayout>
+
+    <!-- Item 1 -->
+    <LinearLayout
+        android:id="@+id/consultation_item1_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp">
+
+        <TextView
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="#F97316"
+            android:textSize="0sp" />
+
+        <TextView
+            android:id="@+id/consultation_item1_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="Konsultasi 1"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- Item 2 -->
+    <LinearLayout
+        android:id="@+id/consultation_item2_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:background="#F97316"
+            android:textSize="0sp" />
+
+        <TextView
+            android:id="@+id/consultation_item2_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:text="Konsultasi 2"
+            android:textColor="#E4E4E7"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- Empty state -->
+    <TextView
+        android:id="@+id/consultation_empty_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Tidak ada konsultasi aktif"
+        android:textColor="#71717A"
+        android:textSize="11sp"
+        android:visibility="gone"
+        android:paddingTop="4dp" />
+
+</LinearLayout>

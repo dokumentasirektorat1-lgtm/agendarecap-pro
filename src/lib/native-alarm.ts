@@ -54,7 +54,11 @@ export interface NativeAlarmPluginInterface {
 
   getFCMToken(): Promise<{ token: string }>;
 
-  updateWidgetData(options: { items: Array<{ title: string; time: string }> }): Promise<{ success: boolean }>;
+  updateWidgetData(options: { items: Array<{ title: string; time: string; date?: string }> }): Promise<{ success: boolean }>;
+
+  updateConsultationWidgetData(options: { items: Array<{ title: string; notes?: string; count?: number }> }): Promise<{ success: boolean }>;
+
+  updateAgenda7DaysWidgetData(options: { items: Array<{ title: string; time: string; date: string }> }): Promise<{ success: boolean }>;
 }
 
 const getNativeAlarmPlugin = (): NativeAlarmPluginInterface => {
@@ -222,6 +226,62 @@ export async function requestExactAlarmPermission(): Promise<boolean> {
   }
 }
 
+export interface NotificationSoundSetting {
+  soundEnabled: boolean;
+  soundOption: string;
+  customSoundUri?: string;
+  customSoundName?: string;
+}
+
+export function getNotificationSoundSetting(): NotificationSoundSetting {
+  if (typeof window === 'undefined') {
+    return { soundEnabled: true, soundOption: 'default' };
+  }
+  const enabledStr = localStorage.getItem('agendarecap_sound_enabled');
+  const soundEnabled = enabledStr !== null ? enabledStr !== 'false' : true;
+  const soundOption = localStorage.getItem('agendarecap_default_sound') || 'default';
+  const customSoundUri = localStorage.getItem('agendarecap_custom_sound_uri') || undefined;
+  const customSoundName = localStorage.getItem('agendarecap_custom_sound_name') || undefined;
+
+  return {
+    soundEnabled,
+    soundOption: (soundOption === 'off' || soundOption === 'silent') ? 'default' : soundOption,
+    customSoundUri,
+    customSoundName
+  };
+}
+
+export function saveNotificationSoundSetting(setting: NotificationSoundSetting): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('agendarecap_sound_enabled', setting.soundEnabled ? 'true' : 'false');
+  const effective = setting.soundEnabled ? setting.soundOption : 'off';
+  localStorage.setItem('agendarecap_default_sound', effective);
+  if (setting.customSoundUri) {
+    localStorage.setItem('agendarecap_custom_sound_uri', setting.customSoundUri);
+  }
+  if (setting.customSoundName) {
+    localStorage.setItem('agendarecap_custom_sound_name', setting.customSoundName);
+  }
+}
+
+export function getEffectiveNotificationSound(requestedSound?: string): string {
+  if (typeof window === 'undefined') return requestedSound || 'default';
+  const setting = getNotificationSoundSetting();
+
+  if (!setting.soundEnabled) {
+    return 'silent';
+  }
+
+  const soundToUse = requestedSound && requestedSound !== 'default' ? requestedSound : setting.soundOption;
+  if (soundToUse === 'off' || soundToUse === 'silent') {
+    return 'silent';
+  }
+  if (soundToUse === 'custom' && setting.customSoundUri) {
+    return setting.customSoundUri;
+  }
+  return soundToUse || 'default';
+}
+
 export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput): Promise<boolean> {
   const targetDate = new Date(input.scheduledAt);
   const scheduledAtMs = targetDate.getTime();
@@ -232,12 +292,14 @@ export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput):
     return false;
   }
 
+  const effectiveSound = getEffectiveNotificationSound(input.sound);
+
   if (isNativePlatform()) {
     try {
       const perms = await checkNativeAlarmPermissions();
       const exactAlarmGranted = perms.exactAlarm;
 
-      console.log(`[NATIVE ALARM] schedule requested | Occurrence ID: ${input.occurrenceId} | Alarm ID: ${input.reminderId} | Trigger timestamp: ${scheduledAtMs} (${input.scheduledAt}) | Current timestamp: ${nowMs} (${new Date(nowMs).toISOString()}) | Exact alarm permission: ${exactAlarmGranted ? 'GRANTED' : 'NOT GRANTED'} | Schedule result: ATTEMPTING`);
+      console.log(`[NATIVE ALARM] schedule requested | Occurrence ID: ${input.occurrenceId} | Alarm ID: ${input.reminderId} | Trigger timestamp: ${scheduledAtMs} (${input.scheduledAt}) | Current timestamp: ${nowMs} (${new Date(nowMs).toISOString()}) | Sound: ${effectiveSound} | Exact alarm permission: ${exactAlarmGranted ? 'GRANTED' : 'NOT GRANTED'} | Schedule result: ATTEMPTING`);
 
       if (!exactAlarmGranted) {
         console.warn('[NATIVE ALARM] EXACT_ALARM_PERMISSION = NOT GRANTED');
@@ -248,7 +310,7 @@ export async function scheduleNativeLocalAlarm(input: ScheduleNativeAlarmInput):
         occurrenceId: input.occurrenceId,
         title: input.title,
         note: input.body || '',
-        sound: input.sound || 'default',
+        sound: effectiveSound,
         scheduledAtMs
       });
       console.log(`[NATIVE ALARM] schedule result: ${res.success ? 'SUCCESS' : 'FAILED'} | Occurrence ID: ${input.occurrenceId}`);
@@ -327,6 +389,10 @@ export async function getScheduledNativeAlarms(): Promise<any[]> {
   }
 }
 
+let webAudioCtx: any = null;
+let webAudioOsc: any = null;
+let webAudioElem: HTMLAudioElement | null = null;
+
 export async function playNativeAudioPreview(sound: string): Promise<boolean> {
   if (isNativePlatform()) {
     try {
@@ -337,7 +403,38 @@ export async function playNativeAudioPreview(sound: string): Promise<boolean> {
       return false;
     }
   }
-  return false;
+
+  // Web Browser Fallback Audio Preview
+  try {
+    await stopNativeAudioPreview();
+    if (sound.startsWith('data:audio') || sound.startsWith('http://') || sound.startsWith('https://') || sound.startsWith('blob:')) {
+      webAudioElem = new Audio(sound);
+      await webAudioElem.play();
+      return true;
+    }
+
+    const AudioContextClass = typeof window !== 'undefined' ? (window.AudioContext || (window as any).webkitAudioContext) : null;
+    if (!AudioContextClass) return false;
+    webAudioCtx = new AudioContextClass();
+    const osc = webAudioCtx.createOscillator();
+    const gain = webAudioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(webAudioCtx.destination);
+
+    let freq = 440;
+    if (sound === 'chime') freq = 587.33;
+    else if (sound === 'digital') freq = 880;
+    else if (sound === 'urgent') freq = 1046.5;
+    else if (sound === 'ringtone') freq = 523.25;
+
+    osc.frequency.setValueAtTime(freq, webAudioCtx.currentTime);
+    gain.gain.setValueAtTime(0.15, webAudioCtx.currentTime);
+    osc.start();
+    webAudioOsc = osc;
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 export async function stopNativeAudioPreview(): Promise<boolean> {
@@ -350,7 +447,25 @@ export async function stopNativeAudioPreview(): Promise<boolean> {
       return false;
     }
   }
-  return false;
+
+  try {
+    if (webAudioElem) {
+      webAudioElem.pause();
+      webAudioElem = null;
+    }
+    if (webAudioOsc) {
+      webAudioOsc.stop();
+      webAudioOsc.disconnect();
+      webAudioOsc = null;
+    }
+    if (webAudioCtx) {
+      webAudioCtx.close();
+      webAudioCtx = null;
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 export async function getNativeFCMToken(): Promise<string | null> {
@@ -364,7 +479,7 @@ export async function getNativeFCMToken(): Promise<string | null> {
   }
 }
 
-export async function updateNativeWidgetData(items: Array<{ title: string; time: string }>): Promise<boolean> {
+export async function updateNativeWidgetData(items: Array<{ title: string; time: string; date?: string }>): Promise<boolean> {
   if (!isNativePlatform()) return false;
   try {
     const res = await NativeAlarm.updateWidgetData({ items });
@@ -375,3 +490,24 @@ export async function updateNativeWidgetData(items: Array<{ title: string; time:
   }
 }
 
+export async function updateNativeConsultationWidgetData(items: Array<{ title: string; notes?: string; count?: number }>): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const res = await NativeAlarm.updateConsultationWidgetData({ items });
+    return res.success;
+  } catch (err) {
+    console.warn('[NATIVE ALARM] updateConsultationWidgetData notice:', err);
+    return false;
+  }
+}
+
+export async function updateNativeAgenda7DaysWidgetData(items: Array<{ title: string; time: string; date: string }>): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const res = await NativeAlarm.updateAgenda7DaysWidgetData({ items });
+    return res.success;
+  } catch (err) {
+    console.warn('[NATIVE ALARM] updateAgenda7DaysWidgetData notice:', err);
+    return false;
+  }
+}

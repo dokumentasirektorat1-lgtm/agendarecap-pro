@@ -22,6 +22,7 @@ export interface SupabaseAgendaPayload {
   onlineLink?: string;
   meetingId?: string;
   meetingPasscode?: string;
+  isUrgent?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -78,6 +79,7 @@ export function sanitizeAgendaForSupabase(input: any): SupabaseAgendaPayload {
   if (input.onlineLink !== undefined) sanitized.onlineLink = input.onlineLink;
   if (input.meetingId !== undefined) sanitized.meetingId = input.meetingId;
   if (input.meetingPasscode !== undefined) sanitized.meetingPasscode = input.meetingPasscode;
+  if (input.isUrgent !== undefined) sanitized.isUrgent = input.isUrgent;
   if (input.created_at !== undefined) sanitized.created_at = input.created_at;
   if (input.updated_at !== undefined) sanitized.updated_at = input.updated_at;
 

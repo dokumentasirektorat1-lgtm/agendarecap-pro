@@ -54,6 +54,7 @@ export default function NotificationSettingsPage() {
 
   // Sound Engine State
   const [selectedSound, setSelectedSound] = useState<string>("default");
+  const [isSoundEnabled, setIsSoundEnabled] = useState<boolean>(true);
   const [customSoundUri, setCustomSoundUri] = useState<string>("");
   const [customSoundName, setCustomSoundName] = useState<string>("");
   const [isPlayingAudio, setIsPlayingAudio] = useState<boolean>(false);
@@ -64,8 +65,17 @@ export default function NotificationSettingsPage() {
   const [isSubscribingWebPush, setIsSubscribingWebPush] = useState<boolean>(false);
 
   useEffect(() => {
+    const savedSoundEnabled = localStorage.getItem('agendarecap_sound_enabled');
+    if (savedSoundEnabled !== null) {
+      setIsSoundEnabled(savedSoundEnabled !== 'false');
+    }
     const savedSound = localStorage.getItem('agendarecap_default_sound') || 'default';
-    setSelectedSound(savedSound);
+    if (savedSound === 'off' || savedSound === 'silent') {
+      setIsSoundEnabled(false);
+      setSelectedSound('default');
+    } else {
+      setSelectedSound(savedSound);
+    }
     const savedCustomUri = localStorage.getItem('agendarecap_custom_sound_uri') || '';
     const savedCustomName = localStorage.getItem('agendarecap_custom_sound_name') || '';
     setCustomSoundUri(savedCustomUri);
@@ -313,15 +323,19 @@ export default function NotificationSettingsPage() {
   };
 
   const handleSaveSoundPreference = () => {
-    localStorage.setItem('agendarecap_default_sound', selectedSound);
+    localStorage.setItem('agendarecap_sound_enabled', isSoundEnabled ? 'true' : 'false');
+    const effectiveSound = isSoundEnabled ? selectedSound : 'off';
+    localStorage.setItem('agendarecap_default_sound', effectiveSound);
     if (selectedSound === 'custom' && customSoundUri) {
       localStorage.setItem('agendarecap_custom_sound_uri', customSoundUri);
       localStorage.setItem('agendarecap_custom_sound_name', customSoundName);
     }
     Swal.fire({
       icon: 'success',
-      title: 'Suara Notifikasi Disimpan',
-      text: `Pengaturan suara default pengingat diubah ke: ${selectedSound.toUpperCase()}`
+      title: 'Pengaturan Suara Disimpan',
+      text: isSoundEnabled 
+        ? `Suara notifikasi aktif: ${selectedSound.toUpperCase()}`
+        : 'Suara notifikasi dimatikan (OFF). Pengingat akan muncul tanpa suara (getar tetap aktif).'
     });
   };
 

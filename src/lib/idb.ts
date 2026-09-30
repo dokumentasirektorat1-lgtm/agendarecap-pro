@@ -397,6 +397,23 @@ export async function addToOfflineQueue(item: Omit<IDBOfflineQueueItem, 'id' | '
             store.put(pendingCreate);
             return resolve();
           }
+
+          // Check if there is an existing pending UPDATE for this entity
+          const pendingUpdate = existingItems.find(
+            i => i.entity_type === item.entity_type && i.entity_id === item.entity_id && i.operation === 'UPDATE' && (i.status === 'PENDING' || i.status === 'FAILED_RETRYABLE')
+          );
+
+          if (pendingUpdate) {
+            pendingUpdate.payload = {
+              ...pendingUpdate.payload,
+              ...item.payload
+            };
+            pendingUpdate.status = 'PENDING';
+            pendingUpdate.retry_count = 0;
+            pendingUpdate.created_at = now;
+            store.put(pendingUpdate);
+            return resolve();
+          }
         }
 
         const fullItem: IDBOfflineQueueItem = {

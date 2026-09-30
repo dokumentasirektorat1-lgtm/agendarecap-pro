@@ -111,13 +111,16 @@ public class AlarmReceiver extends BroadcastReceiver {
                     .setPriority(NotificationCompat.PRIORITY_MAX)
                     .setCategory(NotificationCompat.CATEGORY_ALARM)
                     .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                    .setSound(channelInfo.soundUri)
                     .setVibrate(new long[]{0, 500, 200, 500, 200, 500})
                     .setOngoing(true)
                     .setAutoCancel(false)
                     .addAction(R.mipmap.ic_launcher, "❌ CLOSE", closePendingIntent)
                     .addAction(R.mipmap.ic_launcher, "⏱ 5 MIN", snooze5PendingIntent)
                     .addAction(R.mipmap.ic_launcher, "⏱ 15 MIN", snooze15PendingIntent);
+
+            if (channelInfo.soundUri != null) {
+                builder.setSound(channelInfo.soundUri);
+            }
 
             NotificationManagerCompat notificationManager = NotificationManagerCompat.from(context);
             notificationManager.notify(notificationId, builder.build());
@@ -149,7 +152,10 @@ public class AlarmReceiver extends BroadcastReceiver {
 
         if (soundOption != null && !soundOption.trim().isEmpty()) {
             String lower = soundOption.toLowerCase().trim();
-            if (lower.startsWith("content://") || lower.startsWith("file://")) {
+            if (lower.equals("off") || lower.equals("silent") || lower.equals("none")) {
+                cleanKey = "silent";
+                soundUri = null;
+            } else if (lower.startsWith("content://") || lower.startsWith("file://")) {
                 cleanKey = "custom_" + Math.abs(soundOption.hashCode());
                 soundUri = Uri.parse(soundOption);
             } else if (lower.equals("chime") || lower.equals("notification")) {
@@ -164,7 +170,7 @@ public class AlarmReceiver extends BroadcastReceiver {
             }
         }
 
-        if (soundUri == null) {
+        if (soundUri == null && !cleanKey.equals("silent")) {
             soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
         }
 
@@ -180,11 +186,6 @@ public class AlarmReceiver extends BroadcastReceiver {
             if (manager != null) {
                 NotificationChannel existingChannel = manager.getNotificationChannel(info.channelId);
                 if (existingChannel == null) {
-                    AudioAttributes audioAttributes = new AudioAttributes.Builder()
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .setUsage(AudioAttributes.USAGE_ALARM)
-                            .build();
-
                     NotificationChannel channel = new NotificationChannel(
                             info.channelId,
                             info.channelName,
@@ -195,7 +196,16 @@ public class AlarmReceiver extends BroadcastReceiver {
                     channel.setLightColor(Color.BLUE);
                     channel.enableVibration(true);
                     channel.setVibrationPattern(new long[]{0, 500, 200, 500, 200, 500});
-                    channel.setSound(info.soundUri, audioAttributes);
+
+                    if (info.soundUri != null) {
+                        AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .build();
+                        channel.setSound(info.soundUri, audioAttributes);
+                    } else {
+                        channel.setSound(null, null);
+                    }
 
                     manager.createNotificationChannel(channel);
                 }

@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStore, Agenda } from "@/store/useStore";
-import { Shield, Clock, CalendarHeart, X, Check, ArrowLeft, Edit2, AlertCircle, Star, Trash2 } from "lucide-react";
+import { Shield, Clock, CalendarHeart, X, Check, ArrowLeft, Edit2, AlertCircle, Star, Trash2, CalendarDays, Layers, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
@@ -21,6 +21,13 @@ function useDebounceCallback<Args extends any[]>(callback: (...args: Args) => vo
   }, [callback, delay]);
 }
 
+export interface ConsultationGroup {
+  groupId: string;
+  title: string;
+  isUrgent: boolean;
+  notes?: string;
+  agendas: Agenda[];
+}
 
 export default function ConsultationPage() {
   const { agendas, updateAgenda, deleteAgenda, fetchAgendas, addAgenda, isLoading } = useStore();
@@ -31,15 +38,51 @@ export default function ConsultationPage() {
   }, [fetchAgendas]);
 
   // Filter agendas that need consultation (pending_consultation, rescheduled, or unscheduled)
-  const consultationAgendas = agendas.filter(
-    (a) => (a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed
-  ).sort((a, b) => {
-    if (a.isUrgent && !b.isUrgent) return -1;
-    if (!a.isUrgent && b.isUrgent) return 1;
-    const timeA = a.scheduled_at ? new Date(a.scheduled_at).getTime() : 0;
-    const timeB = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
-    return timeA - timeB;
-  });
+  const consultationAgendas = useMemo(() => {
+    return agendas.filter(
+      (a) => (a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed
+    );
+  }, [agendas]);
+
+  // Group agendas by groupId or id to merge multi-day/batch consultations (Section 8)
+  const consultationGroups: ConsultationGroup[] = useMemo(() => {
+    const map = new Map<string, ConsultationGroup>();
+
+    for (const a of consultationAgendas) {
+      const key = a.groupId || a.id;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          groupId: key,
+          title: a.title,
+          isUrgent: Boolean(a.isUrgent),
+          notes: a.privateNotes || a.notes || "",
+          agendas: [a]
+        });
+      } else {
+        existing.agendas.push(a);
+        if (a.isUrgent) existing.isUrgent = true;
+      }
+    }
+
+    // Sort agendas inside each group by scheduled_at
+    for (const group of map.values()) {
+      group.agendas.sort((a, b) => {
+        const timeA = a.scheduled_at ? new Date(a.scheduled_at).getTime() : 0;
+        const timeB = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0;
+        return timeA - timeB;
+      });
+    }
+
+    // Sort groups: urgent first, then earliest agenda date
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.isUrgent && !b.isUrgent) return -1;
+      if (!a.isUrgent && b.isUrgent) return 1;
+      const tA = a.agendas[0]?.scheduled_at ? new Date(a.agendas[0].scheduled_at).getTime() : 0;
+      const tB = b.agendas[0]?.scheduled_at ? new Date(b.agendas[0].scheduled_at).getTime() : 0;
+      return tA - tB;
+    });
+  }, [consultationAgendas]);
 
   // Debounced save for private notes
   const debouncedSaveNotes = useDebounceCallback(async (id: string, notes: string) => {
@@ -47,20 +90,35 @@ export default function ConsultationPage() {
   }, 1000);
 
   const handleNotesChange = (id: string, value: string) => {
-    // Optimistic local state update (will be managed by inputs local state while typing, 
-    // but here we just debounce to store)
     debouncedSaveNotes(id, value);
   };
 
-  const handleConfirm = async (agenda: Agenda) => {
+  const handleConfirmSingle = async (agenda: Agenda) => {
     const success = await updateAgenda(agenda.id, { status: 'confirmed' });
     if (success) {
       Swal.fire({ toast: true, position: 'top-end', icon: 'success', title: 'Jadwal Dikonfirmasi', showConfirmButton: false, timer: 1500 });
     }
   };
 
+  const handleConfirmGroup = async (group: ConsultationGroup) => {
+    let allOk = true;
+    for (const a of group.agendas) {
+      const ok = await updateAgenda(a.id, { status: 'confirmed' });
+      if (!ok) allOk = false;
+    }
+    if (allOk) {
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: `Seluruh Jadwal (${group.agendas.length} Agenda) Dikonfirmasi`,
+        showConfirmButton: false,
+        timer: 1500
+      });
+    }
+  };
+
   const handleCancelConsultation = async (agenda: Agenda) => {
-    // Return to unscheduled — do NOT assign a date or mark as cancelled
     const success = await updateAgenda(agenda.id, { status: 'unscheduled', scheduled_at: null as any });
     if (success) {
       Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Dikembalikan ke Belum Terjadwal', showConfirmButton: false, timer: 1500 });
@@ -96,6 +154,7 @@ export default function ConsultationPage() {
   const handleAddConsultation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newConsultation) return;
+    const groupId = crypto.randomUUID?.() || Date.now().toString();
     const success = await addAgenda({
       title: newConsultation,
       location: '-',
@@ -105,6 +164,7 @@ export default function ConsultationPage() {
       scheduled_at: new Date().toISOString(),
       status: 'pending_consultation',
       isShareable: false,
+      groupId
     });
     if (success) {
       setNewConsultation("");
@@ -139,8 +199,10 @@ export default function ConsultationPage() {
           </div>
           
           <div className="text-right hidden sm:block">
-            <div className="text-3xl font-bold text-orange-400">{consultationAgendas.length}</div>
-            <div className="text-xs text-orange-400/80 uppercase tracking-widest">Menunggu Arahan</div>
+            <div className="text-3xl font-bold text-orange-400">{consultationGroups.length}</div>
+            <div className="text-xs text-orange-400/80 uppercase tracking-widest">
+              {consultationAgendas.length} Total Agenda
+            </div>
           </div>
         </header>
 
@@ -150,11 +212,11 @@ export default function ConsultationPage() {
             type="text" 
             value={newConsultation}
             onChange={(e) => setNewConsultation(e.target.value)}
-            placeholder="Ketik topik konsultasi baru (non-agenda)..."
+            placeholder="Ketik topik konsultasi baru..."
             className="flex-1 bg-[#1A1A1D] border border-white/10 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-orange-500/50 shadow-inner"
           />
           <button type="submit" disabled={!newConsultation.trim()} className="px-6 py-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-colors shrink-0">
-            Tambah
+            Tambah Topik
           </button>
         </form>
 
@@ -168,17 +230,21 @@ export default function ConsultationPage() {
                   <h3 className="text-lg text-zinc-400 font-semibold mb-1">Memuat Data Konsultasi</h3>
                 </motion.div>
               </div>
-            ) : consultationAgendas.length > 0 ? (
-              consultationAgendas.map((agenda) => (
-                <ConsultationCard 
-                  key={agenda.id} 
-                  agenda={agenda} 
-                  onConfirm={handleConfirm}
+            ) : consultationGroups.length > 0 ? (
+              consultationGroups.map((group) => (
+                <ConsultationGroupCard 
+                  key={group.groupId} 
+                  group={group} 
+                  onConfirmSingle={handleConfirmSingle}
+                  onConfirmGroup={handleConfirmGroup}
                   onCancelConsultation={handleCancelConsultation}
                   onDelete={handleDeleteAgenda}
                   onDateChange={handleDateChange}
                   onNotesChange={handleNotesChange}
-                  onToggleUrgent={() => updateAgenda(agenda.id, { isUrgent: !agenda.isUrgent })}
+                  onToggleUrgent={(agendaId) => {
+                    const target = group.agendas.find(a => a.id === agendaId);
+                    if (target) updateAgenda(target.id, { isUrgent: !target.isUrgent });
+                  }}
                 />
               ))
             ) : (
@@ -207,84 +273,31 @@ export default function ConsultationPage() {
   );
 }
 
-// Subcomponent for isolating local input states and preventing full list re-renders
-function ConsultationCard({ agenda, onConfirm, onCancelConsultation, onDelete, onDateChange, onNotesChange, onToggleUrgent }: {
-  agenda: Agenda, 
-  onConfirm: (a: Agenda) => void,
-  onCancelConsultation: (a: Agenda) => void,
-  onDelete: (a: Agenda) => void,
-  onDateChange: (id: string, date: string) => void,
-  onNotesChange: (id: string, val: string) => void,
-  onToggleUrgent: () => void
+// Group Component: Renders 1 Consultation process that may have multiple related agendas (Section 8)
+function ConsultationGroupCard({ 
+  group, 
+  onConfirmSingle, 
+  onConfirmGroup, 
+  onCancelConsultation, 
+  onDelete, 
+  onDateChange, 
+  onNotesChange, 
+  onToggleUrgent 
+}: {
+  group: ConsultationGroup;
+  onConfirmSingle: (a: Agenda) => void;
+  onConfirmGroup: (g: ConsultationGroup) => void;
+  onCancelConsultation: (a: Agenda) => void;
+  onDelete: (a: Agenda) => void;
+  onDateChange: (id: string, date: string) => void;
+  onNotesChange: (id: string, val: string) => void;
+  onToggleUrgent: (agendaId: string) => void;
 }) {
-  const [localNotes, setLocalNotes] = useState(agenda.privateNotes || "");
-  const [localDate, setLocalDate] = useState(
-    agenda.scheduled_at ? format(new Date(agenda.scheduled_at), "yyyy-MM-dd'T'HH:mm") : ""
-  );
+  const [isExpanded, setIsExpanded] = useState(group.isUrgent);
+  const primaryAgenda = group.agendas[0];
+  const isMultiAgenda = group.agendas.length > 1;
 
-  // Auto-collapse future items (anything starting tomorrow), unless user marks it as urgent
-  const agendaDate = agenda.scheduled_at ? new Date(agenda.scheduled_at) : new Date(0);
-  const now = new Date();
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
-  const isFuture = agenda.scheduled_at ? agendaDate.getTime() > endOfToday.getTime() : false;
-  
-  const [isExpanded, setIsExpanded] = useState(agenda.isUrgent ? true : !isFuture);
-
-  // If the agenda status changes, ensure urgent remains open
-  useEffect(() => {
-    if (agenda.isUrgent) setIsExpanded(true);
-  }, [agenda.isUrgent]);
-
-  if (!isExpanded) {
-    return (
-      <motion.div
-        layout
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="glass px-5 py-3 rounded-2xl border border-white/5 flex justify-between items-center relative overflow-hidden cursor-pointer hover:bg-white/10 hover:border-white/20 transition-all shadow-md group"
-        onClick={() => setIsExpanded(true)}
-      >
-        <div className={`absolute left-0 top-0 bottom-0 w-1 ${agenda.status === 'rescheduled' ? 'bg-blue-500' : agenda.status === 'unscheduled' ? 'bg-purple-500' : 'bg-orange-500'}`} />
-        <div className="pl-2 flex-1">
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={(e) => { e.stopPropagation(); onToggleUrgent(); }}
-              className={`p-1.5 rounded-lg transition-colors ${agenda.isUrgent ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-zinc-500 hover:text-yellow-400 hover:bg-white/10'}`}
-              title={agenda.isUrgent ? "Hapus Marka Mendesak" : "Tandai Mendesak"}
-            >
-              <Star className={`w-4 h-4 ${agenda.isUrgent ? 'fill-yellow-400' : ''}`} />
-            </button>
-            <h3 className="font-bold text-white text-base truncate max-w-[200px] sm:max-w-xs">{agenda.title}</h3>
-            {agenda.status === 'rescheduled' ? (
-               <span className="px-2 py-0.5 rounded-full text-[9px] bg-blue-500/10 text-blue-400 font-bold uppercase tracking-wider border border-blue-500/20">
-                 Rescheduled
-               </span>
-            ) : agenda.status === 'unscheduled' ? (
-               <span className="px-2 py-0.5 rounded-full text-[9px] bg-purple-500/10 text-purple-400 font-bold uppercase tracking-wider border border-purple-500/20">
-                 Belum Terjadwal
-               </span>
-            ) : (
-                agenda.scheduled_at && isFuture && (
-                  <span className="px-2 py-0.5 rounded-full text-[9px] bg-white/10 text-zinc-400 uppercase tracking-widest border border-white/5">
-                    Akan Datang
-                  </span>
-                )
-            )}
-          </div>
-          <p className="text-xs text-orange-400 mt-1 flex items-center gap-1.5 font-medium">
-            <Clock className="w-3 h-3" />
-            {agenda.scheduled_at && agenda.status !== 'unscheduled'
-              ? format(new Date(agenda.scheduled_at), 'd MMMM yyyy, HH:mm', { locale: id })
-              : 'Belum Terjadwal'}
-          </p>
-        </div>
-        <button className="text-xs font-semibold text-zinc-400 group-hover:text-white px-4 py-2 bg-white/5 rounded-xl transition-colors">
-          Buka Detail
-        </button>
-      </motion.div>
-    );
-  }
+  const [localNotes, setLocalNotes] = useState(primaryAgenda?.privateNotes || "");
 
   return (
     <motion.div
@@ -292,119 +305,155 @@ function ConsultationCard({ agenda, onConfirm, onCancelConsultation, onDelete, o
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      className="glass p-5 rounded-[1.5rem] border border-orange-500/20 shadow-lg shadow-orange-500/5 flex flex-col md:flex-row gap-6 relative overflow-hidden"
+      className="glass p-5 rounded-[1.8rem] border border-orange-500/20 shadow-lg shadow-orange-500/5 flex flex-col gap-4 relative overflow-hidden"
     >
-      {/* Decorative side border */}
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${agenda.status === 'rescheduled' ? 'bg-blue-500' : agenda.status === 'unscheduled' ? 'bg-purple-500' : 'bg-orange-500'}`} />
+      {/* Decorative side accent bar */}
+      <div className={`absolute left-0 top-0 bottom-0 w-1.5 ${group.isUrgent ? 'bg-yellow-400' : 'bg-orange-500'}`} />
 
-      {/* Close button to collapse manually */}
-      <button 
-        onClick={() => setIsExpanded(false)}
-        className="absolute top-4 right-4 p-1.5 text-zinc-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors md:hidden"
-      >
-        <X className="w-5 h-5" />
-      </button>
-
-      {/* Left Column: Agenda Info */}
-      <div className="flex-1 md:border-r border-white/10 md:pr-6 relative">
-        <div className="flex items-center gap-2 mb-2">
+      {/* Group Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pl-2">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <button 
-            onClick={onToggleUrgent}
-            className={`p-1 rounded-md transition-colors flex items-center gap-1 ${agenda.isUrgent ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-zinc-500 hover:text-yellow-400 hover:bg-white/10'}`}
-            title={agenda.isUrgent ? "Hapus Marka Mendesak" : "Tandai Mendesak"}
+            onClick={() => onToggleUrgent(primaryAgenda.id)}
+            className={`p-1.5 rounded-lg transition-colors flex items-center gap-1.5 ${group.isUrgent ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/5 text-zinc-500 hover:text-yellow-400'}`}
+            title={group.isUrgent ? "Hapus Marka Mendesak" : "Tandai Mendesak"}
           >
-            <Star className={`w-3.5 h-3.5 ${agenda.isUrgent ? 'fill-yellow-400' : ''}`} />
-            <span className="text-[9px] font-bold uppercase tracking-wider pr-1">
-              {agenda.isUrgent ? 'Mendesak' : 'Biasa'}
+            <Star className={`w-4 h-4 ${group.isUrgent ? 'fill-yellow-400' : ''}`} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">
+              {group.isUrgent ? 'Mendesak' : 'Biasa'}
             </span>
           </button>
-          {agenda.status === 'rescheduled' ? (
-             <span className="px-2 py-0.5 rounded-full text-[10px] bg-blue-500/10 text-blue-400 font-bold uppercase tracking-wider border border-blue-500/20">
-               Rescheduled
-             </span>
-          ) : agenda.status === 'unscheduled' ? (
-             <span className="px-2 py-0.5 rounded-full text-[10px] bg-purple-500/10 text-purple-400 font-bold uppercase tracking-wider border border-purple-500/20">
-               Belum Terjadwal
-             </span>
-          ) : (
-            <span className="px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-400 font-bold uppercase tracking-wider border border-orange-500/20 flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" /> Pending Konsultasi
+
+          {isMultiAgenda && (
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 flex items-center gap-1">
+              <Layers className="w-3 h-3 text-indigo-400" />
+              Sesi Terpadu ({group.agendas.length} Agenda)
             </span>
           )}
-        </div>
-        <h3 className="text-xl font-bold text-white mb-1 pr-8 md:pr-0">{agenda.title}</h3>
-        <p className="text-sm text-zinc-400 mb-4">{agenda.location}</p>
 
-        {agenda.notes && (
-          <div className="text-sm text-zinc-400 border-l-[3px] border-white/10 pl-3 mb-4 bg-white/[0.02] p-2 rounded-r-lg">
-            {agenda.notes}
-          </div>
+          <span className="px-2 py-0.5 rounded-full text-[10px] bg-orange-500/10 text-orange-400 font-bold uppercase tracking-wider border border-orange-500/20">
+            Pending Konsultasi
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {isMultiAgenda && (
+            <button
+              onClick={() => onConfirmGroup(group)}
+              className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 active:scale-95"
+            >
+              <Check className="w-3.5 h-3.5" /> Konfirmasi Semua ({group.agendas.length})
+            </button>
+          )}
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="p-1.5 bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white rounded-xl transition-colors"
+          >
+            <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Main Title & Notes preview */}
+      <div className="pl-2">
+        <h3 className="text-xl font-black text-white">{group.title}</h3>
+        {primaryAgenda.location && primaryAgenda.location !== '-' && (
+          <p className="text-xs text-zinc-400 mt-0.5">{primaryAgenda.location}</p>
         )}
-        
-        <div className="flex flex-col gap-2">
-          <label className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Perkiraan Waktu Jadwal</label>
-          <div className="relative">
-            <input
-              type="datetime-local"
-              value={localDate}
-              onChange={(e) => {
-                setLocalDate(e.target.value);
-                onDateChange(agenda.id, e.target.value);
-              }}
-              className="w-full bg-[#1A1A1D] border border-white/10 rounded-xl px-4 py-2.5 text-white shadow-inner focus:outline-none focus:border-orange-500/50 transition-colors"
-            />
-            <Clock className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" />
-          </div>
-        </div>
       </div>
 
-      {/* Right Column: Interactive Quick Actions */}
-      <div className="flex-1 flex flex-col gap-4 relative">
-        <button 
-          onClick={() => setIsExpanded(false)}
-          className="absolute -top-1 -right-1 p-1.5 text-zinc-500 hover:text-white hover:bg-white/10 rounded-lg transition-colors hidden md:block"
+      {/* Expanded Details: List of all agendas under this single consultation */}
+      {isExpanded && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          className="pl-2 flex flex-col gap-4 border-t border-white/5 pt-3"
         >
-          <X className="w-4 h-4" />
-        </button>
-        
-        <div className="flex-1 flex flex-col gap-2 md:pt-4">
-          <label className="text-xs text-orange-400/80 font-bold uppercase tracking-wider flex items-center gap-1.5">
-            <Edit2 className="w-3 h-3" /> Catatan Arahan Pimpinan
-          </label>
-          <textarea
-            value={localNotes}
-            onChange={(e) => {
-              setLocalNotes(e.target.value);
-              onNotesChange(agenda.id, e.target.value);
-            }}
-            placeholder="Ketik arahan atau keputusan di sini... (Otomatis tersimpan)"
-            className="w-full flex-1 min-h-[100px] bg-[#1A1A1D] border border-white/10 rounded-xl p-3 text-sm text-white resize-none focus:outline-none focus:border-orange-500/50 transition-colors shadow-inner"
-          />
-        </div>
-        
-        <div className="flex gap-2">
-          <button
-            onClick={() => onCancelConsultation(agenda)}
-            className="flex-1 px-4 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-xl transition-all text-sm font-semibold flex items-center justify-center gap-2"
-            title="Kembalikan ke Belum Terjadwal — tidak menghapus agenda"
-          >
-            <X className="w-4 h-4" /> Batal Konsultasi
-          </button>
-          <button
-            onClick={() => onDelete(agenda)}
-            className="px-3 py-2.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-xl transition-all text-sm font-semibold flex items-center justify-center gap-2"
-            title="Hapus agenda ini permanen"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => onConfirm(agenda)}
-            className="flex-1 px-4 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow-lg shadow-emerald-500/20 transition-all text-sm font-semibold flex items-center justify-center gap-2"
-          >
-            <Check className="w-4 h-4" /> Konfirmasi Jadwal
-          </button>
-        </div>
-      </div>
+          {/* Notes field */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[11px] text-orange-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <Edit2 className="w-3 h-3" /> Catatan Arahan Pimpinan
+            </label>
+            <textarea
+              value={localNotes}
+              onChange={(e) => {
+                setLocalNotes(e.target.value);
+                group.agendas.forEach(a => onNotesChange(a.id, e.target.value));
+              }}
+              placeholder="Ketik arahan atau keputusan di sini... (Otomatis tersimpan)"
+              className="w-full bg-[#1A1A1D] border border-white/10 rounded-xl p-3 text-xs text-white resize-none focus:outline-none focus:border-orange-500/50 shadow-inner h-20"
+            />
+          </div>
+
+          {/* Agenda Sessions List */}
+          <div className="space-y-2">
+            <label className="text-[11px] text-zinc-400 font-bold uppercase tracking-wider">
+              {isMultiAgenda ? "Daftar Jadwal Sesi Terkait:" : "Jadwal Agenda:"}
+            </label>
+
+            {group.agendas.map((agenda, idx) => {
+              const dtValue = agenda.scheduled_at
+                ? format(new Date(agenda.scheduled_at), "yyyy-MM-dd'T'HH:mm")
+                : "";
+
+              return (
+                <div 
+                  key={agenda.id} 
+                  className="p-3 bg-black/40 rounded-xl border border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-white/10 text-zinc-400 text-[10px] font-bold flex items-center justify-center shrink-0">
+                      {idx + 1}
+                    </span>
+                    <div>
+                      <div className="text-xs font-bold text-white">
+                        {agenda.scheduled_at
+                          ? format(new Date(agenda.scheduled_at), "EEEE, d MMMM yyyy (HH:mm)", { locale: id })
+                          : "Belum Ada Tanggal"}
+                      </div>
+                      <div className="text-[11px] text-zinc-400">
+                        {agenda.location || "-"}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="datetime-local"
+                      value={dtValue}
+                      onChange={(e) => onDateChange(agenda.id, e.target.value)}
+                      className="bg-[#121214] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white focus:outline-none focus:border-orange-500/50 [color-scheme:dark]"
+                    />
+
+                    <button
+                      onClick={() => onCancelConsultation(agenda)}
+                      className="p-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 rounded-lg text-xs"
+                      title="Kembalikan ke belum terjadwal"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => onDelete(agenda)}
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg text-xs"
+                      title="Hapus permanen"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => onConfirmSingle(agenda)}
+                      className="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-all shadow-sm flex items-center gap-1"
+                    >
+                      <Check className="w-3 h-3" /> Konfirmasi
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </motion.div>
+      )}
     </motion.div>
   );
 }

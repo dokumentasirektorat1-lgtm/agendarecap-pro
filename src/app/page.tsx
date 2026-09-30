@@ -234,8 +234,12 @@ export default function Dashboard() {
     setTimeout(() => setEditingAgenda(null), 300);
   };
 
-  // Calculate agenda density per date (taking ALL_DAY into account - Section 21)
-  const agendaDensityByDate = agendas
+  // Calculate agenda density per date using unique canonical agenda IDs (taking ALL_DAY into account - Section 9 & 21)
+  const uniqueAgendas = Array.from(
+    new Map(agendas.map(a => [a.id, a])).values()
+  );
+
+  const agendaDensityByDate = uniqueAgendas
     .filter(a => getAgendaTimeMode(a) !== 'unscheduled' && a.scheduled_at && a.status !== 'cancelled')
     .reduce((acc, a) => {
       const key = format(new Date(a.scheduled_at!), 'yyyy-MM-dd');
@@ -926,16 +930,6 @@ export default function Dashboard() {
               onEditAgenda={handleEdit}
             />
           )}
-          
-          <div className="mt-8 flex justify-center">
-            <button
-              onClick={() => setIsExportModalOpen(true)}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 text-zinc-400 hover:text-white rounded-xl transition-all shadow-lg text-sm font-medium"
-            >
-              <FileDown className="w-4 h-4" />
-              Eksport Agenda ke Excel
-            </button>
-          </div>
         </section>
       </div>
 

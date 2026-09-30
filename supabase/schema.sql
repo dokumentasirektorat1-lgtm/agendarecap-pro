@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.agendas (
   title TEXT NOT NULL,
   location TEXT,
   scheduled_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  time_mode TEXT,
   notes TEXT,
   include_notes_in_share BOOLEAN DEFAULT false,
   is_completed BOOLEAN DEFAULT false,
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.agendas (
   "onlineLink" TEXT,
   "meetingId" TEXT,
   "meetingPasscode" TEXT,
+  "isUrgent" BOOLEAN DEFAULT false,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );

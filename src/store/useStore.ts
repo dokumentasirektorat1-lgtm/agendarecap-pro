@@ -155,8 +155,8 @@ export const useStore = create<StoreState>((set, get) => {
     if (updated) {
       // 2. Update UI State
       set((state) => ({
-        agendas: state.agendas.map((a) =>
-          a.id === id ? (updated as Agenda) : a
+        agendas: deduplicateAgendas(
+          state.agendas.map((a) => (a.id === id ? (updated as Agenda) : a))
         ),
       }));
       syncWidgetData(get().agendas);
@@ -175,7 +175,7 @@ export const useStore = create<StoreState>((set, get) => {
 
       // 2. Update UI State
       set((state) => ({
-        agendas: state.agendas.filter((a) => a.id !== id),
+        agendas: deduplicateAgendas(state.agendas.filter((a) => a.id !== id)),
       }));
       syncWidgetData(get().agendas);
 
@@ -204,7 +204,11 @@ export const useStore = create<StoreState>((set, get) => {
       if (updated) {
         // 2. Update UI State
         set((state) => ({
-          agendas: state.agendas.map((a) => (a.id === id ? (updated as Agenda) : a)),
+          agendas: deduplicateAgendas(
+            state.agendas.map((a) => (a.id === id ? (updated as Agenda) : a))
+          ).sort(
+            (a, b) => new Date(a.scheduled_at || 0).getTime() - new Date(b.scheduled_at || 0).getTime()
+          ),
         }));
         syncWidgetData(get().agendas);
 

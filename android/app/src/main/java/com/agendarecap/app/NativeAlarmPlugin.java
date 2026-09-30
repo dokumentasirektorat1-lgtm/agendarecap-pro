@@ -325,6 +325,14 @@ public class NativeAlarmPlugin extends Plugin {
             stopMedia();
             AlarmReceiver.SoundChannelInfo info = AlarmReceiver.getSoundChannelInfo(context, sound);
 
+            if (info.soundUri == null) {
+                JSObject ret = new JSObject();
+                ret.put("playing", false);
+                ret.put("sound", "silent");
+                call.resolve(ret);
+                return;
+            }
+
             mediaPlayer = new MediaPlayer();
             mediaPlayer.setDataSource(context, info.soundUri);
             mediaPlayer.setAudioStreamType(android.media.AudioManager.STREAM_ALARM);
@@ -378,11 +386,51 @@ public class NativeAlarmPlugin extends Plugin {
             AgendaWidgetStorage.saveWidgetData(context, jsonStr);
             AgendaWidgetProvider.updateAllWidgets(context);
 
+            // Also update Agenda7Days widget with same data
+            Agenda7DaysWidgetProvider.saveAgendaData(context, jsonStr);
+            Agenda7DaysWidgetProvider.updateAllWidgets(context);
+
             JSObject ret = new JSObject();
             ret.put("success", true);
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("Failed to update widget data: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void updateConsultationWidgetData(PluginCall call) {
+        JSArray items = call.getArray("items");
+        Context context = getContext();
+
+        try {
+            String jsonStr = (items != null) ? items.toString() : "[]";
+            ConsultationWidgetProvider.saveConsultationData(context, jsonStr);
+            ConsultationWidgetProvider.updateAllWidgets(context);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to update consultation widget data: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void updateAgenda7DaysWidgetData(PluginCall call) {
+        JSArray items = call.getArray("items");
+        Context context = getContext();
+
+        try {
+            String jsonStr = (items != null) ? items.toString() : "[]";
+            Agenda7DaysWidgetProvider.saveAgendaData(context, jsonStr);
+            Agenda7DaysWidgetProvider.updateAllWidgets(context);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to update agenda 7days widget data: " + e.getMessage());
         }
     }
 

@@ -29,8 +29,9 @@ interface DiagnosticModalProps {
 }
 
 export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL', onQueueUpdated }: DiagnosticModalProps) {
-  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'FAILED'>('ALL');
+  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'FAILED' | 'RESOLVED'>('ALL');
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
+  const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -38,9 +39,29 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
 
   useEffect(() => {
     if (initialFilter) {
-      setFilter(initialFilter);
+      setFilter(initialFilter as 'ALL' | 'PENDING' | 'FAILED' | 'RESOLVED');
     }
   }, [initialFilter]);
+
+  // Persist resolved IDs in sessionStorage so they survive refresh during modal session
+  useEffect(() => {
+    const stored = sessionStorage.getItem('agendaku_diag_resolved');
+    if (stored) setResolvedIds(new Set(JSON.parse(stored)));
+  }, []);
+
+  const markAsResolved = (id: string) => {
+    setResolvedIds(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      sessionStorage.setItem('agendaku_diag_resolved', JSON.stringify([...next]));
+      return next;
+    });
+  };
+
+  const clearAllResolved = () => {
+    setResolvedIds(new Set());
+    sessionStorage.removeItem('agendaku_diag_resolved');
+  };
 
   const loadDiagnosticsData = useCallback(async () => {
     setIsLoading(true);
@@ -156,15 +177,21 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
 
   if (!isOpen) return null;
 
-  const filteredDiagnostics = diagnostics.filter(item => {
-    if (filter === 'PENDING') return item.status === 'PENDING';
-    if (filter === 'FAILED') return item.status === 'FAILED';
-    return true;
-  });
+  // Separate active vs resolved items
+  const activeItems = diagnostics.filter(d => !resolvedIds.has(d.id));
+  const resolvedItems = diagnostics.filter(d => resolvedIds.has(d.id));
 
-  const pendingCount = diagnostics.filter(d => d.status === 'PENDING').length;
-  const failedCount = diagnostics.filter(d => d.status === 'FAILED').length;
-  const successCount = diagnostics.filter(d => d.status === 'SUCCESS').length;
+  const filteredDiagnostics = (() => {
+    const pool = filter === 'RESOLVED' ? resolvedItems : activeItems;
+    if (filter === 'PENDING') return pool.filter(d => d.status === 'PENDING');
+    if (filter === 'FAILED') return pool.filter(d => d.status === 'FAILED');
+    if (filter === 'RESOLVED') return resolvedItems;
+    return pool; // ALL = active pool
+  })();
+
+  const pendingCount = activeItems.filter(d => d.status === 'PENDING').length;
+  const failedCount = activeItems.filter(d => d.status === 'FAILED').length;
+  const successCount = activeItems.filter(d => d.status === 'SUCCESS').length;
 
   const handleManualSync = async () => {
     setIsSyncing(true);
@@ -299,7 +326,7 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
 
         {/* Filter Tabs & Summary */}
         <div className="px-6 py-3 border-b border-white/5 bg-zinc-900/50 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setFilter('ALL')}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
@@ -308,7 +335,7 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
                   : 'bg-white/5 text-zinc-400 hover:text-white'
               }`}
             >
-              Semua ({diagnostics.length})
+              Aktif ({activeItems.length})
             </button>
             <button
               onClick={() => setFilter('PENDING')}
@@ -332,9 +359,30 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
               <AlertTriangle className="w-3.5 h-3.5" />
               <span>Gagal ({failedCount})</span>
             </button>
+            <button
+              onClick={() => setFilter('RESOLVED')}
+              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                filter === 'RESOLVED'
+                  ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20'
+                  : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20'
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Resolved ({resolvedItems.length})</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2">
+            {filter === 'RESOLVED' && resolvedItems.length > 0 && (
+              <button
+                onClick={clearAllResolved}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-red-300 text-xs font-medium transition-all"
+                title="Hapus semua resolved"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Clear Resolved</span>
+              </button>
+            )}
             <button
               onClick={handleCopyLog}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-zinc-300 text-xs font-medium transition-all"
@@ -362,6 +410,8 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
                   ? 'Tidak ada antrean atau tindakan yang sedang pending.'
                   : filter === 'FAILED'
                   ? 'Tidak ada kegagalan aktif pada sistem saat ini.'
+                  : filter === 'RESOLVED'
+                  ? 'Belum ada log yang ditandai selesai.'
                   : 'Sistem dan antrean sinkronisasi berjalan normal.'}
               </p>
             </div>
@@ -382,13 +432,15 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
                     <div className="flex flex-wrap items-center gap-2 mb-1">
                       <span className="font-bold text-white text-sm">{item.feature}</span>
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
-                        item.status === 'FAILED'
+                        resolvedIds.has(item.id)
+                          ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30'
+                          : item.status === 'FAILED'
                           ? 'bg-red-500/20 text-red-300 border-red-500/30'
                           : item.status === 'PENDING'
                           ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                           : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
                       }`}>
-                        {item.status}
+                        {resolvedIds.has(item.id) ? 'RESOLVED' : item.status}
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-400 border border-white/10">
                         {item.category}
@@ -407,14 +459,25 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
                     </div>
                   </div>
 
-                  {item.detail && (
-                    <button
-                      onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
-                      className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-semibold text-purple-300 hover:text-white transition-colors shrink-0"
-                    >
-                      {expandedId === item.id ? 'Sembunyikan' : 'Rincian'}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {!resolvedIds.has(item.id) && (
+                      <button
+                        onClick={() => markAsResolved(item.id)}
+                        className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg text-xs font-semibold text-emerald-300 hover:text-emerald-200 transition-colors"
+                        title="Tandai sebagai resolved"
+                      >
+                        ✓
+                      </button>
+                    )}
+                    {item.detail && (
+                      <button
+                        onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                        className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs font-semibold text-purple-300 hover:text-white transition-colors"
+                      >
+                        {expandedId === item.id ? 'Sembunyikan' : 'Rincian'}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {expandedId === item.id && item.detail && (

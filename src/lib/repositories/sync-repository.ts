@@ -284,9 +284,17 @@ export class SyncRepository {
                 sanitizedPayload.user_id = user.id;
               }
 
-              const { error } = await supabase
+              let { error } = await supabase
                 .from('agendas')
                 .upsert(sanitizedPayload);
+
+              if (error && error.code === 'PGRST204' && (sanitizedPayload as any).time_mode !== undefined) {
+                console.warn('[SYNC ENGINE] Column time_mode not found in schema cache, retrying upsert without time_mode...');
+                delete (sanitizedPayload as any).time_mode;
+                const retry = await supabase.from('agendas').upsert(sanitizedPayload);
+                error = retry.error;
+              }
+
               queryError = error;
               success = !error;
             } else if (item.operation === 'UPDATE') {
@@ -296,10 +304,36 @@ export class SyncRepository {
                 sanitizedPayload.user_id = user.id;
               }
 
-              const { error } = await supabase
+              let { data, error } = await supabase
                 .from('agendas')
                 .update(sanitizedPayload)
-                .eq('id', item.entity_id);
+                .eq('id', item.entity_id)
+                .select();
+
+              if (error && error.code === 'PGRST204' && (sanitizedPayload as any).time_mode !== undefined) {
+                console.warn('[SYNC ENGINE] Column time_mode not found in schema cache, retrying update without time_mode...');
+                delete (sanitizedPayload as any).time_mode;
+                const retry = await supabase
+                  .from('agendas')
+                  .update(sanitizedPayload)
+                  .eq('id', item.entity_id)
+                  .select();
+                error = retry.error;
+                data = retry.data;
+              }
+
+              // Fallback to upsert if update affected 0 rows (e.g. entity was created offline)
+              if (!error && (!data || data.length === 0)) {
+                console.log(`[SYNC ENGINE] Agenda UPDATE affected 0 rows for ID ${item.entity_id}, falling back to upsert...`);
+                const fullPayload: any = {
+                  ...sanitizedPayload,
+                  id: item.entity_id,
+                  user_id: user ? user.id : sanitizedPayload.user_id
+                };
+                const upsertRes = await supabase.from('agendas').upsert(fullPayload);
+                error = upsertRes.error;
+              }
+
               queryError = error;
               success = !error;
             } else if (item.operation === 'DELETE') {
@@ -753,6 +787,7 @@ export class SyncRepository {
                 location: r.location || '',
                 notes: r.notes || '',
                 scheduled_at: r.scheduled_at,
+                time_mode: r.time_mode || undefined,
                 privateNotes: r.privateNotes || '',
                 is_completed: r.is_completed || false,
                 include_notes_in_share: r.include_notes_in_share || false,
