@@ -5,27 +5,82 @@ import { syncRepository } from "@/lib/repositories/sync-repository";
 import Swal from "sweetalert2";
 
 import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode, AgendaTimeMode } from "@/lib/agenda-time";
-import { updateNativeWidgetData, isNativePlatform } from "@/lib/native-alarm";
-import { isSameDay } from "date-fns";
+import { 
+  updateNativeWidgetData, 
+  updateNativeAgenda7DaysWidgetData, 
+  updateNativeConsultationWidgetData, 
+  isNativePlatform 
+} from "@/lib/native-alarm";
+import { isSameDay, format } from "date-fns";
 
 function syncWidgetData(agendas: Agenda[]) {
   if (!isNativePlatform()) return;
   try {
     const today = new Date();
-    const todayAgendas = agendas.filter(a => {
+
+    // 1. AgendaWidgetProvider (Primary daily/upcoming widget)
+    let todayAgendas = agendas.filter(a => {
       if (a.status === 'cancelled') return false;
       if (getAgendaTimeMode(a) === 'unscheduled') return false;
       if (!a.scheduled_at) return false;
       return isSameDay(new Date(a.scheduled_at), today);
     });
 
-    const widgetItems = todayAgendas.map(a => ({
+    // Fallback: If no agenda today, show the closest upcoming agendas within 7 days
+    if (todayAgendas.length === 0) {
+      const nowTime = today.getTime();
+      const nextWeekTime = nowTime + 7 * 24 * 60 * 60 * 1000;
+      todayAgendas = agendas.filter(a => {
+        if (a.status === 'cancelled') return false;
+        if (getAgendaTimeMode(a) === 'unscheduled') return false;
+        if (!a.scheduled_at) return false;
+        const t = new Date(a.scheduled_at).getTime();
+        return t >= nowTime && t <= nextWeekTime;
+      }).slice(0, 3);
+    }
+
+    const widgetItems = todayAgendas.slice(0, 3).map(a => ({
       title: a.title,
       time: getAgendaTimeDisplay(a)
     }));
 
     updateNativeWidgetData(widgetItems).catch(() => {});
-  } catch (e) {}
+
+    // 2. Agenda7DaysWidgetProvider (Interactive 7-day widget with date navigation)
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const endOf7Days = startOfToday + 8 * 24 * 60 * 60 * 1000;
+
+    const sevenDaysAgendas = agendas
+      .filter(a => {
+        if (a.status === 'cancelled') return false;
+        if (getAgendaTimeMode(a) === 'unscheduled') return false;
+        if (!a.scheduled_at) return false;
+        const t = new Date(a.scheduled_at).getTime();
+        return t >= startOfToday && t <= endOf7Days;
+      })
+      .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
+      .map(a => ({
+        title: a.title,
+        time: getAgendaTimeDisplay(a),
+        date: format(new Date(a.scheduled_at), 'yyyy-MM-dd')
+      }));
+
+    updateNativeAgenda7DaysWidgetData(sevenDaysAgendas).catch(() => {});
+
+    // 3. ConsultationWidgetProvider (Active consultation widget)
+    const consultationItems = agendas
+      .filter(a => (a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed)
+      .slice(0, 10)
+      .map(a => ({
+        title: a.title,
+        notes: a.notes || '',
+        count: 1
+      }));
+
+    updateNativeConsultationWidgetData(consultationItems).catch(() => {});
+  } catch (e) {
+    console.warn('[WIDGET SYNC] Error syncing widget data:', e);
+  }
 }
 
 export type Agenda = {

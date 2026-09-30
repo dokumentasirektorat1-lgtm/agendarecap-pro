@@ -17,6 +17,13 @@ public class BootReceiver extends BroadcastReceiver {
             Intent.ACTION_MY_PACKAGE_REPLACED.equals(action) ||
             "android.intent.action.QUICKBOOT_POWERON".equals(action)) {
 
+            // Refresh all home screen widgets from cached local storage
+            try {
+                AgendaWidgetProvider.updateAllWidgets(context);
+                Agenda7DaysWidgetProvider.updateAllWidgets(context);
+                ConsultationWidgetProvider.updateAllWidgets(context);
+            } catch (Exception ignored) {}
+
             Map<String, ?> alarmsMap = AlarmStorage.getAllAlarms(context);
             if (alarmsMap == null || alarmsMap.isEmpty()) return;
 

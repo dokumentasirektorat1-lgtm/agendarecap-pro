@@ -386,10 +386,6 @@ public class NativeAlarmPlugin extends Plugin {
             AgendaWidgetStorage.saveWidgetData(context, jsonStr);
             AgendaWidgetProvider.updateAllWidgets(context);
 
-            // Also update Agenda7Days widget with same data
-            Agenda7DaysWidgetProvider.saveAgendaData(context, jsonStr);
-            Agenda7DaysWidgetProvider.updateAllWidgets(context);
-
             JSObject ret = new JSObject();
             ret.put("success", true);
             call.resolve(ret);

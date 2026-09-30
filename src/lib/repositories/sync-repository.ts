@@ -630,7 +630,7 @@ export class SyncRepository {
             console.warn(`[SYNC ENGINE] ===== END SYNC FAILURE =====`);
 
             // Purge unresolvable / legacy failed queue items to clear offline_queue
-            if (nextRetry >= 2 || errCode === '42501' || errCode === '23505' || errCode === 'RLS_OR_ZERO_ROWS') {
+            if (nextRetry >= 5 || errCode === '23505' || errCode === 'RLS_OR_ZERO_ROWS') {
               console.warn(`[SYNC ENGINE] Purging unresolvable queue item ${rawItem.id} from IndexedDB.`);
               await removeFromOfflineQueue(rawItem.id);
             } else {
@@ -663,7 +663,7 @@ export class SyncRepository {
 
           errors.push(err.message || String(err));
           
-          if (nextRetry >= 2) {
+          if (nextRetry >= 5) {
             console.warn(`[SYNC ENGINE] Purging exception-failed queue item ${rawItem.id} from IndexedDB.`);
             await removeFromOfflineQueue(rawItem.id);
           } else {
