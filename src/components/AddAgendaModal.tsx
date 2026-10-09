@@ -11,9 +11,11 @@ interface AddAgendaModalProps {
   onClose: () => void;
   defaultDate: Date;
   editAgenda?: Agenda | null;
+  initialTimeMode?: AgendaTimeMode;
+  initialStatus?: 'confirmed' | 'pending_consultation' | 'rescheduled' | 'cancelled' | 'unscheduled';
 }
 
-export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: AddAgendaModalProps) {
+export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda, initialTimeMode, initialStatus }: AddAgendaModalProps) {
   const { addAgenda, updateAgenda } = useStore();
   const [title, setTitle] = useState("");
   const [location, setLocation] = useState("");
@@ -53,7 +55,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
     if (isOpen) {
       if (editAgenda) {
         setTitle(editAgenda.title);
-        setLocation(editAgenda.location);
+        setLocation(editAgenda.location || "");
         setNotes(editAgenda.notes || "");
         setPrivateNotes(editAgenda.privateNotes || "");
         setIncludeNotes(editAgenda.include_notes_in_share);
@@ -96,8 +98,9 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
         setIncludeNotes(false);
         setSelectedDateStr(format(defaultDate, "yyyy-MM-dd"));
         setTime("09:00");
-        setTimeMode("exact");
-        setStatus('confirmed');
+        const defaultMode = initialTimeMode || "exact";
+        setTimeMode(defaultMode);
+        setStatus(initialStatus || (defaultMode === 'unscheduled' ? 'unscheduled' : 'confirmed'));
         setIsShareable(true);
         setIsMultiDay(false);
         setIsRecurringWeekly(false);
@@ -112,7 +115,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
         setMeetingPasscode("");
       }
     }
-  }, [isOpen, editAgenda, defaultDate]);
+  }, [isOpen, editAgenda, defaultDate, initialTimeMode, initialStatus]);
 
   useEffect(() => {
     if (isMultiDay && endDate >= defaultDate) {
@@ -142,31 +145,50 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !location) return;
+    if (!title?.trim()) return;
+
+    // Fallback location for online or general agenda
+    const trimmedLocation = location.trim() || (isOnline ? 'Online Meeting' : '-');
 
     setIsSubmitting(true);
     let success = true;
 
     try {
-      const effectiveStatus = timeMode === 'unscheduled' ? 'unscheduled' : (status === 'unscheduled' ? 'confirmed' : status);
+      const isUnscheduled = timeMode === 'unscheduled' || status === 'unscheduled';
+      const effectiveStatus = isUnscheduled ? 'unscheduled' : status;
+      const effectiveTimeMode = isUnscheduled ? 'unscheduled' : timeMode;
+
+      // Safe date parser to avoid RangeError: Invalid time value
+      const getScheduledIso = (targetDateStr: string, targetTime: string, mode: AgendaTimeMode) => {
+        let baseDate: Date;
+        if (!targetDateStr) {
+          baseDate = defaultDate ? new Date(defaultDate) : new Date();
+        } else {
+          baseDate = new Date(targetDateStr + 'T00:00:00');
+        }
+        if (isNaN(baseDate.getTime())) {
+          baseDate = new Date();
+        }
+        if (mode === 'exact') {
+          const [hours, minutes] = (targetTime || "09:00").split(":").map(Number);
+          baseDate.setHours(isNaN(hours) ? 9 : hours, isNaN(minutes) ? 0 : minutes, 0, 0);
+        } else {
+          baseDate.setHours(0, 0, 0, 0);
+        }
+        return baseDate.toISOString();
+      };
 
       if (editAgenda) {
-        const scheduledDate = new Date(selectedDateStr + 'T00:00:00');
-        if (timeMode === 'exact') {
-          const [hours, minutes] = time.split(":").map(Number);
-          scheduledDate.setHours(hours, minutes, 0, 0);
-        } else {
-          scheduledDate.setHours(0, 0, 0, 0);
-        }
+        const scheduledIso = getScheduledIso(selectedDateStr, time, effectiveTimeMode);
 
         success = await updateAgenda(editAgenda.id, {
-          title,
-          location,
+          title: title.trim(),
+          location: trimmedLocation,
           notes,
           privateNotes,
           include_notes_in_share: includeNotes,
-          scheduled_at: scheduledDate.toISOString(),
-          time_mode: timeMode,
+          scheduled_at: scheduledIso,
+          time_mode: effectiveTimeMode,
           status: effectiveStatus,
           isShareable,
           isOnline,
@@ -184,7 +206,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
           const dayOfWeek = curr.getDay(); // 0 = Sun, 1 = Mon...
           if (selectedDays.includes(dayOfWeek)) {
             const scheduledDate = new Date(curr);
-            if (timeMode === 'exact') {
+            if (effectiveTimeMode === 'exact') {
               const [hours, minutes] = time.split(":").map(Number);
               scheduledDate.setHours(hours, minutes, 0, 0);
             } else {
@@ -192,13 +214,13 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
             }
 
             const res = await addAgenda({
-              title,
-              location,
+              title: title.trim(),
+              location: trimmedLocation,
               notes,
               privateNotes,
               include_notes_in_share: includeNotes,
               scheduled_at: scheduledDate.toISOString(),
-              time_mode: timeMode,
+              time_mode: effectiveTimeMode,
               status: effectiveStatus,
               isShareable,
               groupId,
@@ -211,78 +233,71 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
           }
           curr.setDate(curr.getDate() + 1);
         }
-      } else {
-        if (isMultiDay) {
-          const groupId = crypto.randomUUID?.() || Date.now().toString();
-          
-          let curr = new Date(selectedDateStr + 'T00:00:00');
-          curr.setHours(0,0,0,0);
-          const end = new Date(endDate);
-          end.setHours(0,0,0,0);
+      } else if (isMultiDay) {
+        const groupId = crypto.randomUUID?.() || Date.now().toString();
+        
+        let curr = new Date(selectedDateStr + 'T00:00:00');
+        curr.setHours(0,0,0,0);
+        const end = new Date(endDate);
+        end.setHours(0,0,0,0);
 
-          while (curr <= end) {
-            const key = format(curr, 'yyyy-MM-dd');
-            const dayTime = multiDateTimes[key] || "09:00";
-            const scheduledDate = new Date(curr);
-            if (timeMode === 'exact') {
-              const [hours, minutes] = dayTime.split(":").map(Number);
-              scheduledDate.setHours(hours, minutes, 0, 0);
-            } else {
-              scheduledDate.setHours(0, 0, 0, 0);
-            }
-
-            const res = await addAgenda({
-              title,
-              location,
-              notes,
-              privateNotes,
-              include_notes_in_share: includeNotes,
-              scheduled_at: scheduledDate.toISOString(),
-              time_mode: timeMode,
-              status: effectiveStatus,
-              isShareable,
-              groupId,
-              isOnline,
-              onlineLink,
-              meetingId,
-              meetingPasscode
-            });
-            if (!res) success = false;
-            curr.setDate(curr.getDate() + 1);
-          }
-        } else {
-          const scheduledDate = new Date(selectedDateStr + 'T00:00:00');
-          if (timeMode === 'exact') {
-            const [hours, minutes] = time.split(":").map(Number);
+        while (curr <= end) {
+          const key = format(curr, 'yyyy-MM-dd');
+          const dayTime = multiDateTimes[key] || "09:00";
+          const scheduledDate = new Date(curr);
+          if (effectiveTimeMode === 'exact') {
+            const [hours, minutes] = dayTime.split(":").map(Number);
             scheduledDate.setHours(hours, minutes, 0, 0);
           } else {
             scheduledDate.setHours(0, 0, 0, 0);
           }
 
-          success = await addAgenda({
-            title,
-            location,
+          const res = await addAgenda({
+            title: title.trim(),
+            location: trimmedLocation,
             notes,
             privateNotes,
             include_notes_in_share: includeNotes,
             scheduled_at: scheduledDate.toISOString(),
-            time_mode: timeMode,
+            time_mode: effectiveTimeMode,
             status: effectiveStatus,
             isShareable,
+            groupId,
             isOnline,
             onlineLink,
             meetingId,
             meetingPasscode
           });
+          if (!res) success = false;
+          curr.setDate(curr.getDate() + 1);
         }
-      }
-    } catch (e) {
-      success = false;
-    }
+      } else {
+        const scheduledIso = getScheduledIso(selectedDateStr, time, effectiveTimeMode);
 
-    setIsSubmitting(false);
-    if (success) {
-      onClose();
+        success = await addAgenda({
+          title: title.trim(),
+          location: trimmedLocation,
+          notes,
+          privateNotes,
+          include_notes_in_share: includeNotes,
+          scheduled_at: scheduledIso,
+          time_mode: effectiveTimeMode,
+          status: effectiveStatus,
+          isShareable,
+          isOnline,
+          onlineLink,
+          meetingId,
+          meetingPasscode
+        });
+      }
+
+      if (success) {
+        onClose();
+      }
+    } catch (err) {
+      console.error("Gagal menyimpan agenda:", err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -544,14 +559,13 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
                 <div className="flex gap-4 items-end">
                   <div className="flex-1">
                     <label className="block text-sm font-medium text-zinc-400 mb-1.5 flex items-center gap-1">
-                      <MapPin className="w-4 h-4" /> Tempat <span className="text-red-400">*</span>
+                      <MapPin className="w-4 h-4" /> Tempat {isOnline ? "(Opsional)" : <span className="text-zinc-500 font-normal text-xs">(Opsional)</span>}
                     </label>
                     <input
                       type="text"
-                      required
                       value={location}
                       onChange={(e) => setLocation(e.target.value)}
-                      placeholder={isOnline ? "Zoom / GMeet / Dsb..." : "Ruang Rapat..."}
+                      placeholder={isOnline ? "Zoom / GMeet / Dsb..." : "Ruang Rapat / -"}
                       className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all"
                     />
                   </div>
@@ -660,7 +674,15 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda }: Add
                   <label className="block text-sm font-medium text-zinc-400 mb-1.5">Status Agenda</label>
                   <select
                     value={status}
-                    onChange={(e) => setStatus(e.target.value as any)}
+                    onChange={(e) => {
+                      const nextStatus = e.target.value as any;
+                      setStatus(nextStatus);
+                      if (nextStatus === 'unscheduled') {
+                        setTimeMode('unscheduled');
+                      } else if (timeMode === 'unscheduled') {
+                        setTimeMode('exact');
+                      }
+                    }}
                     className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-all [&>option]:bg-[#121214] [&>option]:text-white"
                   >
                     <option value="confirmed">Confirmed</option>

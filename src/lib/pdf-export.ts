@@ -4,7 +4,7 @@ import { format, parseISO, eachDayOfInterval, isSameDay } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { Agenda } from "@/store/useStore";
 import { AppSettings } from "@/app/actions/settings";
-import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode } from "./agenda-time";
+import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "./agenda-time";
 import { buildTimelineBlocks, TimelineBlock } from "./agenda-timeline";
 
 export interface PDFExportOptions {
@@ -78,11 +78,17 @@ export function generateAgendaPDF({
   // Filter agendas according to mode
   let filteredAgendas = [...agendas];
   if (mode === "range" && startDate && endDate) {
+    const startOfStartDate = new Date(startDate);
+    startOfStartDate.setHours(0, 0, 0, 0);
+    const endOfEndDate = new Date(endDate);
+    endOfEndDate.setHours(23, 59, 59, 999);
+
     filteredAgendas = filteredAgendas.filter(a => {
-      const timeMode = getAgendaTimeMode(a);
-      if (timeMode === "unscheduled") return false;
+      // Unscheduled agendas are always preserved for Section I
+      if (isAgendaUnscheduled(a)) return true;
+      if (!a.scheduled_at) return false;
       const agendaDate = new Date(a.scheduled_at);
-      return agendaDate >= startDate && agendaDate <= endDate;
+      return agendaDate >= startOfStartDate && agendaDate <= endOfEndDate;
     });
   }
 
@@ -156,21 +162,52 @@ export function generateAgendaPDF({
   });
 
   const totalScheduledCount = timelineBlocks.reduce((acc, b) => acc + (b.type === "DAY_WITH_AGENDAS" ? b.agendas.length : 0), 0);
+  const hasUnscheduled = unscheduledAgendas.length > 0;
+  const hasScheduled = tableRows.length > 0;
 
-  // Section I: AGENDA TERJADWAL
-  if (tableRows.length > 0) {
-    doc.setTextColor(15, 23, 42);
+  // Section: BELUM ADA TANGGAL (UNSCHEDULED) - Ditempatkan di bagian paling atas sesuai permintaan
+  if (hasUnscheduled) {
+    const unscheduledSectionNumber = "I";
+    doc.setTextColor(180, 83, 9); // Amber 700
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
-    doc.text(`I. TIMELINE AGENDA TERJADWAL (${totalScheduledCount} Agenda)`, 14, startY);
+    doc.text(`${unscheduledSectionNumber}. BELUM ADA TANGGAL / UNSCHEDULED (${unscheduledAgendas.length} Agenda)`, 14, startY);
+
+    const unscheduledRows = unscheduledAgendas.map((agenda, idx) => {
+      const isCancelled = agenda.status === 'cancelled';
+      const isPending = agenda.status === 'pending_consultation';
+      const isRescheduled = agenda.status === 'rescheduled';
+      const statusLabel = getAgendaStatusLabel(agenda.status);
+      const rowTextColor: [number, number, number] = isCancelled ? [220, 38, 38] : [30, 41, 59];
+      const statusTextColor: [number, number, number] = isCancelled
+        ? [220, 38, 38]
+        : isPending
+        ? [217, 119, 6]
+        : isRescheduled
+        ? [79, 70, 229]
+        : [180, 83, 9];
+
+      let locationText = agenda.location || "-";
+      if (agenda.isOnline) {
+        locationText = `[ONLINE] ${agenda.location || 'Meeting'}`;
+      }
+
+      return [
+        { content: (idx + 1).toString(), styles: { textColor: rowTextColor, halign: "center" as const } },
+        { content: "Belum Ada Tanggal", styles: { textColor: rowTextColor, halign: "center" as const } },
+        { content: isCancelled ? `[DIBATALKAN] ${agenda.title}` : agenda.title, styles: { textColor: rowTextColor, fontStyle: "bold" } },
+        { content: locationText, styles: { textColor: rowTextColor } },
+        { content: statusLabel, styles: { textColor: statusTextColor, fontStyle: "bold", halign: "center" as const } }
+      ];
+    });
 
     autoTable(doc, {
       startY: startY + 4,
       head: [["No", "Waktu / Semantik", "Judul Agenda", "Tempat / Lokasi", "Status"]],
-      body: tableRows as any,
+      body: unscheduledRows as any,
       theme: "grid",
       headStyles: {
-        fillColor: [79, 70, 229], // Indigo 600
+        fillColor: [217, 119, 6], // Amber 600
         textColor: 255,
         fontSize: 9,
         fontStyle: "bold",
@@ -209,53 +246,26 @@ export function generateAgendaPDF({
     startY = (doc as any).lastAutoTable.finalY + 10;
   }
 
-  // Section II: BELUM ADA TANGGAL (UNSCHEDULED)
-  if (unscheduledAgendas.length > 0) {
+  // Section: AGENDA TERJADWAL
+  if (hasScheduled) {
     if (startY > 160) {
       doc.addPage();
       startY = 20;
     }
 
-    doc.setTextColor(180, 83, 9); // Amber 700
+    const scheduledSectionNumber = hasUnscheduled ? "II" : "I";
+    doc.setTextColor(15, 23, 42);
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
-    doc.text(`II. BELUM ADA TANGGAL / UNSCHEDULED (${unscheduledAgendas.length} Agenda)`, 14, startY);
-
-    const unscheduledRows = unscheduledAgendas.map((agenda, idx) => {
-      const isCancelled = agenda.status === 'cancelled';
-      const isPending = agenda.status === 'pending_consultation';
-      const isRescheduled = agenda.status === 'rescheduled';
-      const statusLabel = getAgendaStatusLabel(agenda.status);
-      const rowTextColor: [number, number, number] = isCancelled ? [220, 38, 38] : [30, 41, 59];
-      const statusTextColor: [number, number, number] = isCancelled
-        ? [220, 38, 38]
-        : isPending
-        ? [217, 119, 6]
-        : isRescheduled
-        ? [79, 70, 229]
-        : [180, 83, 9];
-
-      let locationText = agenda.location || "-";
-      if (agenda.isOnline) {
-        locationText = `[ONLINE] ${agenda.location || 'Meeting'}`;
-      }
-
-      return [
-        { content: (idx + 1).toString(), styles: { textColor: rowTextColor, halign: "center" as const } },
-        { content: "Belum Ada Tanggal", styles: { textColor: rowTextColor, halign: "center" as const } },
-        { content: isCancelled ? `[DIBATALKAN] ${agenda.title}` : agenda.title, styles: { textColor: rowTextColor, fontStyle: "bold" } },
-        { content: locationText, styles: { textColor: rowTextColor } },
-        { content: statusLabel, styles: { textColor: statusTextColor, fontStyle: "bold", halign: "center" as const } }
-      ];
-    });
+    doc.text(`${scheduledSectionNumber}. TIMELINE AGENDA TERJADWAL (${totalScheduledCount} Agenda)`, 14, startY);
 
     autoTable(doc, {
       startY: startY + 4,
       head: [["No", "Waktu / Semantik", "Judul Agenda", "Tempat / Lokasi", "Status"]],
-      body: unscheduledRows as any,
+      body: tableRows as any,
       theme: "grid",
       headStyles: {
-        fillColor: [217, 119, 6], // Amber 600
+        fillColor: [79, 70, 229], // Indigo 600
         textColor: 255,
         fontSize: 9,
         fontStyle: "bold",

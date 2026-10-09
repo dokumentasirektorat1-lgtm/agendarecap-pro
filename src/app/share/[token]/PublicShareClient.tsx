@@ -7,6 +7,7 @@ import { CalendarHeart, MapPin, Share2, FileText, CheckCircle2, Circle, Clock, S
 import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode } from "@/lib/agenda-time";
 import { generateAgendaPDF } from "@/lib/pdf-export";
 import { buildTimelineBlocks } from "@/lib/agenda-timeline";
+import { getAppName } from "@/lib/branding";
 import Swal from "sweetalert2";
 import Link from "next/link";
 
@@ -137,6 +138,7 @@ export default function PublicShareClient({ token }: { token: string }) {
       agendas: filteredAgendas as any,
       title: "REKAP AGENDA",
       subtitle: `Tautan Agenda: ${token}`,
+      appSettings: { app_name: getAppName() } as any,
       mode: startDateStr && endDateStr ? "range" : "full",
       startDate: startDateStr ? new Date(startDateStr + "T00:00:00") : undefined,
       endDate: endDateStr ? new Date(endDateStr + "T23:59:59") : undefined
@@ -155,6 +157,7 @@ export default function PublicShareClient({ token }: { token: string }) {
 
   const handleCopyPublicSummary = () => {
     if (agendas.length === 0) return;
+    const currentAppName = getAppName();
     let text = `*REKAP AGENDA*\n\n`;
     
     if (scheduledAgendas.length > 0) {
@@ -173,7 +176,7 @@ export default function PublicShareClient({ token }: { token: string }) {
       });
     }
 
-    text += `_Dibuat via AgendaKu Shared Portal_`;
+    text += `_Dibuat via ${currentAppName} Shared Portal_`;
     navigator.clipboard.writeText(text);
     setIsCopied(true);
     setTimeout(() => setIsCopied(false), 2500);
@@ -205,7 +208,7 @@ export default function PublicShareClient({ token }: { token: string }) {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-white tracking-tight">AgendaKu</h1>
+                <h1 className="text-xl font-bold text-white tracking-tight">{getAppName()}</h1>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                   <ShieldCheck className="w-3 h-3" /> READ-ONLY PORTAL
                 </span>

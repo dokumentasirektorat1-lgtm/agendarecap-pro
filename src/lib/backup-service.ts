@@ -24,7 +24,7 @@ export interface BackupSummary {
 /**
  * Generates and downloads a clean, structured JSON backup file of all agendas.
  */
-export function downloadAgendaBackup(agendas: Agenda[], appSettings?: AppSettings | null) {
+export function getAgendaBackupData(agendas: Agenda[], appSettings?: AppSettings | null) {
   const appName = appSettings?.app_name || "AgendaRecap Pro";
   const now = new Date();
   
@@ -38,10 +38,14 @@ export function downloadAgendaBackup(agendas: Agenda[], appSettings?: AppSetting
   };
 
   const jsonString = JSON.stringify(backupObject, null, 2);
+  const fileName = `Backup_Data_Agenda_${format(now, "yyyyMMdd_HHmm")}.json`;
+  return { fileName, jsonString };
+}
+
+export function downloadAgendaBackup(agendas: Agenda[], appSettings?: AppSettings | null) {
+  const { fileName, jsonString } = getAgendaBackupData(agendas, appSettings);
   const blob = new Blob([jsonString], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-  
-  const fileName = `Backup_Data_Agenda_${format(now, "yyyyMMdd_HHmm")}.json`;
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;

@@ -15,7 +15,8 @@ import {
   cancelAllNativeLocalAlarms,
   getScheduledNativeAlarms,
   playNativeAudioPreview,
-  stopNativeAudioPreview
+  stopNativeAudioPreview,
+  saveCustomSoundNative
 } from "@/lib/native-alarm";
 
 export default function NotificationSettingsPage() {
@@ -305,12 +306,24 @@ export default function NotificationSettingsPage() {
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUri = event.target?.result as string;
-      setCustomSoundUri(dataUri);
+      let effectiveUri = dataUri;
+      if (isNativePlatform()) {
+        try {
+          const base64Data = dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
+          const res = await saveCustomSoundNative({ base64Data, fileName: file.name });
+          if (res.success && res.soundUri) {
+            effectiveUri = res.soundUri;
+          }
+        } catch (err) {
+          console.error('Failed to save custom sound natively:', err);
+        }
+      }
+      setCustomSoundUri(effectiveUri);
       setCustomSoundName(file.name);
       setSelectedSound('custom');
-      localStorage.setItem('agendarecap_custom_sound_uri', dataUri);
+      localStorage.setItem('agendarecap_custom_sound_uri', effectiveUri);
       localStorage.setItem('agendarecap_custom_sound_name', file.name);
 
       Swal.fire({

@@ -13,7 +13,8 @@ import {
   getNotificationSoundSetting, 
   saveNotificationSoundSetting, 
   playNativeAudioPreview, 
-  stopNativeAudioPreview 
+  stopNativeAudioPreview,
+  saveCustomSoundNative
 } from "@/lib/native-alarm";
 
 interface SettingsFormProps {
@@ -81,15 +82,27 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
     }
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const dataUri = event.target?.result as string;
-      setCustomSoundUri(dataUri);
+      let effectiveUri = dataUri;
+      if (isNativePlatform()) {
+        try {
+          const base64Data = dataUri.includes(',') ? dataUri.split(',')[1] : dataUri;
+          const res = await saveCustomSoundNative({ base64Data, fileName: file.name });
+          if (res.success && res.soundUri) {
+            effectiveUri = res.soundUri;
+          }
+        } catch (err) {
+          console.error("Failed to save custom sound natively:", err);
+        }
+      }
+      setCustomSoundUri(effectiveUri);
       setCustomSoundName(file.name);
       setSoundOption('custom');
       saveNotificationSoundSetting({
         soundEnabled: true,
         soundOption: 'custom',
-        customSoundUri: dataUri,
+        customSoundUri: effectiveUri,
         customSoundName: file.name
       });
       Swal.fire({

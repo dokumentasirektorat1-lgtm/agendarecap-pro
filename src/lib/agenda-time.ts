@@ -10,16 +10,31 @@ export interface AgendaTimeItem {
 }
 
 export function getAgendaTimeMode(agenda: AgendaTimeItem): AgendaTimeMode {
+  // status='unscheduled' always takes priority — user can change status
+  // without changing time_mode, so we must check status first.
+  if (agenda.status === 'unscheduled') {
+    return 'unscheduled';
+  }
   if (agenda.time_mode) {
     const mode = String(agenda.time_mode).toLowerCase() as AgendaTimeMode;
     if (['exact', 'flex', 'all_day', 'unscheduled'].includes(mode)) {
       return mode;
     }
   }
-  if (agenda.status === 'unscheduled' || !agenda.scheduled_at) {
+  if (!agenda.scheduled_at) {
     return 'unscheduled';
   }
   return 'exact';
+}
+
+export function isAgendaUnscheduled(agenda: AgendaTimeItem | null | undefined): boolean {
+  if (!agenda) return false;
+  return (
+    agenda.status === 'unscheduled' ||
+    agenda.time_mode === 'unscheduled' ||
+    !agenda.scheduled_at ||
+    getAgendaTimeMode(agenda) === 'unscheduled'
+  );
 }
 
 export function getAgendaTimeDisplay(agenda: AgendaTimeItem): string {

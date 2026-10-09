@@ -15,6 +15,15 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.util.Base64;
+import androidx.core.content.FileProvider;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.util.Map;
 import org.json.JSONObject;
 
@@ -317,12 +326,105 @@ public class NativeAlarmPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void saveCustomSound(PluginCall call) {
+        String base64Data = call.getString("base64Data");
+        String fileName = call.getString("fileName", "custom_alarm.mp3");
+        String mimeType = call.getString("mimeType", "audio/mpeg");
+
+        if (base64Data == null || base64Data.trim().isEmpty()) {
+            call.reject("Must provide base64Data");
+            return;
+        }
+
+        Context context = getContext();
+        try {
+            String base64Clean = base64Data.contains(",")
+                    ? base64Data.substring(base64Data.indexOf(",") + 1)
+                    : base64Data;
+            byte[] fileBytes = Base64.decode(base64Clean, Base64.DEFAULT);
+
+            // 1. Simpan ke internal files storage
+            File soundDir = new File(context.getFilesDir(), "sounds");
+            if (!soundDir.exists()) {
+                soundDir.mkdirs();
+            }
+            File localFile = new File(soundDir, "custom_notification_sound.mp3");
+            try (FileOutputStream fos = new FileOutputStream(localFile)) {
+                fos.write(fileBytes);
+                fos.flush();
+            }
+
+            // 2. Pada Android 10+ (Q+), daftarkan ke MediaStore Notifications agar SystemUI dapat membaca
+            Uri resolvedUri = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    ContentResolver resolver = context.getContentResolver();
+                    ContentValues contentValues = new ContentValues();
+                    contentValues.put(MediaStore.Audio.Media.DISPLAY_NAME, fileName);
+                    contentValues.put(MediaStore.Audio.Media.MIME_TYPE, mimeType);
+                    contentValues.put(MediaStore.Audio.Media.IS_NOTIFICATION, 1);
+                    contentValues.put(MediaStore.Audio.Media.IS_ALARM, 1);
+                    contentValues.put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_NOTIFICATIONS);
+
+                    Uri collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
+                    Uri itemUri = resolver.insert(collection, contentValues);
+                    if (itemUri != null) {
+                        try (OutputStream os = resolver.openOutputStream(itemUri)) {
+                            if (os != null) {
+                                os.write(fileBytes);
+                                os.flush();
+                            }
+                        }
+                        resolvedUri = itemUri;
+                    }
+                } catch (Exception mediaStoreEx) {
+                    // Fallback to localFile
+                }
+            }
+
+            if (resolvedUri == null) {
+                resolvedUri = Uri.fromFile(localFile);
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("soundUri", resolvedUri.toString());
+            ret.put("soundName", fileName);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Gagal menyimpan audio kustom: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void playAudioPreview(PluginCall call) {
         String sound = call.getString("sound", "default");
         Context context = getContext();
 
         try {
             stopMedia();
+
+            if (sound != null && sound.startsWith("data:")) {
+                String base64Clean = sound.contains(",") ? sound.substring(sound.indexOf(",") + 1) : sound;
+                byte[] decoded = Base64.decode(base64Clean, Base64.DEFAULT);
+                File cacheFile = new File(context.getCacheDir(), "preview_audio.mp3");
+                try (FileOutputStream fos = new FileOutputStream(cacheFile)) {
+                    fos.write(decoded);
+                    fos.flush();
+                }
+                mediaPlayer = new MediaPlayer();
+                mediaPlayer.setDataSource(cacheFile.getAbsolutePath());
+                mediaPlayer.setAudioStreamType(android.media.AudioManager.STREAM_ALARM);
+                mediaPlayer.prepare();
+                mediaPlayer.start();
+
+                JSObject ret = new JSObject();
+                ret.put("playing", true);
+                ret.put("sound", "custom");
+                call.resolve(ret);
+                return;
+            }
+
             AlarmReceiver.SoundChannelInfo info = AlarmReceiver.getSoundChannelInfo(context, sound);
 
             if (info.soundUri == null) {
@@ -427,6 +529,101 @@ public class NativeAlarmPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("Failed to update agenda 7days widget data: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void saveAndOpenFile(PluginCall call) {
+        String fileName = call.getString("fileName");
+        String base64Data = call.getString("base64Data");
+        String mimeType = call.getString("mimeType", "application/octet-stream");
+        boolean openFile = call.getBoolean("openFile", true);
+
+        if (fileName == null || base64Data == null) {
+            call.reject("Must provide fileName and base64Data");
+            return;
+        }
+
+        Context context = getContext();
+        try {
+            byte[] fileBytes = Base64.decode(base64Data, Base64.DEFAULT);
+
+            // 1. Simpan ke Download folder publik
+            boolean savedToPublic = false;
+            String savedLocation = "";
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContentResolver resolver = context.getContentResolver();
+                ContentValues contentValues = new ContentValues();
+                contentValues.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
+                contentValues.put(MediaStore.Downloads.MIME_TYPE, mimeType);
+                contentValues.put(MediaStore.Downloads.IS_PENDING, 1);
+
+                Uri collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                Uri itemUri = resolver.insert(collection, contentValues);
+                if (itemUri != null) {
+                    try (OutputStream os = resolver.openOutputStream(itemUri)) {
+                        if (os != null) {
+                            os.write(fileBytes);
+                            os.flush();
+                        }
+                    }
+                    contentValues.clear();
+                    contentValues.put(MediaStore.Downloads.IS_PENDING, 0);
+                    resolver.update(itemUri, contentValues, null, null);
+                    savedToPublic = true;
+                    savedLocation = "Folder Download (" + fileName + ")";
+                }
+            }
+
+            if (!savedToPublic) {
+                File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (downloadsDir != null) {
+                    if (!downloadsDir.exists()) {
+                        downloadsDir.mkdirs();
+                    }
+                    File destFile = new File(downloadsDir, fileName);
+                    try (FileOutputStream fos = new FileOutputStream(destFile)) {
+                        fos.write(fileBytes);
+                        fos.flush();
+                    }
+                    savedLocation = destFile.getAbsolutePath();
+                }
+            }
+
+            // 2. Simpan juga ke cache internal untuk dibuka langsung dengan FileProvider
+            File cacheDir = context.getCacheDir();
+            File shareFile = new File(cacheDir, fileName);
+            try (FileOutputStream fos = new FileOutputStream(shareFile)) {
+                fos.write(fileBytes);
+                fos.flush();
+            }
+
+            Uri contentUri = FileProvider.getUriForFile(
+                context,
+                context.getPackageName() + ".fileprovider",
+                shareFile
+            );
+
+            // 3. Jika openFile = true, buka chooser untuk melihat / membagikan file
+            if (openFile) {
+                Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+                viewIntent.setDataAndType(contentUri, mimeType);
+                viewIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                Intent chooser = Intent.createChooser(viewIntent, "Buka atau Bagikan: " + fileName);
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(chooser);
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("fileName", fileName);
+            ret.put("savedLocation", savedLocation);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Gagal menyimpan file ke perangkat: " + e.getMessage());
         }
     }
 

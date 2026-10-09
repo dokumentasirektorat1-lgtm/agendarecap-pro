@@ -158,6 +158,25 @@ public class AlarmReceiver extends BroadcastReceiver {
             } else if (lower.startsWith("content://") || lower.startsWith("file://")) {
                 cleanKey = "custom_" + Math.abs(soundOption.hashCode());
                 soundUri = Uri.parse(soundOption);
+            } else if (lower.startsWith("data:")) {
+                try {
+                    String base64Clean = soundOption.contains(",")
+                            ? soundOption.substring(soundOption.indexOf(",") + 1)
+                            : soundOption;
+                    byte[] audioBytes = android.util.Base64.decode(base64Clean, android.util.Base64.DEFAULT);
+                    java.io.File soundDir = new java.io.File(context.getFilesDir(), "sounds");
+                    if (!soundDir.exists()) soundDir.mkdirs();
+                    java.io.File soundFile = new java.io.File(soundDir, "cached_alarm_sound.mp3");
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(soundFile)) {
+                        fos.write(audioBytes);
+                        fos.flush();
+                    }
+                    cleanKey = "custom_" + Math.abs(soundFile.getAbsolutePath().hashCode());
+                    soundUri = Uri.fromFile(soundFile);
+                } catch (Exception ex) {
+                    cleanKey = "default";
+                    soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
+                }
             } else if (lower.equals("chime") || lower.equals("notification")) {
                 cleanKey = "chime";
                 soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);

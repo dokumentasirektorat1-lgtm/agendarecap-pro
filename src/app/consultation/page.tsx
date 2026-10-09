@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useStore, Agenda } from "@/store/useStore";
-import { Shield, Clock, CalendarHeart, X, Check, ArrowLeft, Edit2, AlertCircle, Star, Trash2, CalendarDays, Layers, ChevronDown } from "lucide-react";
+import { Shield, Clock, CalendarHeart, X, Check, ArrowLeft, Edit2, AlertCircle, Star, Trash2, CalendarDays, Layers, ChevronDown, Plus } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { format } from "date-fns";
@@ -119,9 +119,41 @@ export default function ConsultationPage() {
   };
 
   const handleCancelConsultation = async (agenda: Agenda) => {
-    const success = await updateAgenda(agenda.id, { status: 'unscheduled', scheduled_at: null as any });
+    const success = await updateAgenda(agenda.id, { 
+      status: 'unscheduled',
+      time_mode: 'unscheduled'
+    });
     if (success) {
       Swal.fire({ toast: true, position: 'top-end', icon: 'info', title: 'Dikembalikan ke Belum Terjadwal', showConfirmButton: false, timer: 1500 });
+    }
+  };
+
+  const handleAddSessionToGroup = async (group: ConsultationGroup) => {
+    const primary = group.agendas[0];
+    const newDate = primary?.scheduled_at ? new Date(primary.scheduled_at) : new Date();
+
+    const success = await addAgenda({
+      title: group.title,
+      location: primary?.location || '-',
+      notes: primary?.notes || '',
+      privateNotes: primary?.privateNotes || '',
+      include_notes_in_share: false,
+      scheduled_at: newDate.toISOString(),
+      status: 'pending_consultation',
+      isShareable: false,
+      groupId: group.groupId
+    });
+
+    if (success) {
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: 'Item Sesi Ditambahkan',
+        text: 'Silakan sesuaikan tanggal dan waktu sesi baru.',
+        showConfirmButton: false,
+        timer: 1500
+      });
     }
   };
 
@@ -238,6 +270,7 @@ export default function ConsultationPage() {
                   onConfirmSingle={handleConfirmSingle}
                   onConfirmGroup={handleConfirmGroup}
                   onCancelConsultation={handleCancelConsultation}
+                  onAddSession={handleAddSessionToGroup}
                   onDelete={handleDeleteAgenda}
                   onDateChange={handleDateChange}
                   onNotesChange={handleNotesChange}
@@ -279,6 +312,7 @@ function ConsultationGroupCard({
   onConfirmSingle, 
   onConfirmGroup, 
   onCancelConsultation, 
+  onAddSession,
   onDelete, 
   onDateChange, 
   onNotesChange, 
@@ -288,6 +322,7 @@ function ConsultationGroupCard({
   onConfirmSingle: (a: Agenda) => void;
   onConfirmGroup: (g: ConsultationGroup) => void;
   onCancelConsultation: (a: Agenda) => void;
+  onAddSession: (g: ConsultationGroup) => void;
   onDelete: (a: Agenda) => void;
   onDateChange: (id: string, date: string) => void;
   onNotesChange: (id: string, val: string) => void;
@@ -451,6 +486,15 @@ function ConsultationGroupCard({
                 </div>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => onAddSession(group)}
+              className="w-full py-2.5 px-3 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/20 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95 mt-2 shadow-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Tambah Sesi / Item Jadwal ke Topik Ini</span>
+            </button>
           </div>
         </motion.div>
       )}

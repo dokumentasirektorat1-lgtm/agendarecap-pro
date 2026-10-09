@@ -25,7 +25,7 @@ export async function GET(
     if (/^\d{4}-\d{2}-\d{2}$/.test(token)) {
       const startIso = `${token}T00:00:00.000Z`;
       const endIso = `${token}T23:59:59.999Z`;
-      query = query.or(`scheduled_at.gte.${startIso},scheduled_at.lte.${endIso},status.eq.unscheduled,time_mode.eq.unscheduled`);
+      query = query.or(`and(scheduled_at.gte.${startIso},scheduled_at.lte.${endIso}),status.eq.unscheduled,time_mode.eq.unscheduled`);
     }
 
     const { data, error } = await query;

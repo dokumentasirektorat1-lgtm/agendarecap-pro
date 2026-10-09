@@ -67,14 +67,30 @@ function syncWidgetData(agendas: Agenda[]) {
 
     updateNativeAgenda7DaysWidgetData(sevenDaysAgendas).catch(() => {});
 
-    // 3. ConsultationWidgetProvider (Active consultation widget)
-    const consultationItems = agendas
-      .filter(a => (a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed)
+    // 3. ConsultationWidgetProvider (Active consultation widget grouped by groupId || id)
+    const consultationMap = new Map<string, { title: string; count: number; notes: string }>();
+    for (const a of agendas) {
+      if ((a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed) {
+        const groupKey = a.groupId || a.id;
+        const existing = consultationMap.get(groupKey);
+        if (!existing) {
+          consultationMap.set(groupKey, {
+            title: a.title,
+            count: 1,
+            notes: a.privateNotes || a.notes || ''
+          });
+        } else {
+          existing.count += 1;
+        }
+      }
+    }
+
+    const consultationItems = Array.from(consultationMap.values())
       .slice(0, 10)
-      .map(a => ({
-        title: a.title,
-        notes: a.notes || '',
-        count: 1
+      .map(g => ({
+        title: g.count > 1 ? `${g.title} (${g.count} Sesi)` : g.title,
+        notes: g.notes,
+        count: g.count
       }));
 
     updateNativeConsultationWidgetData(consultationItems).catch(() => {});

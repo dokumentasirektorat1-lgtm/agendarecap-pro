@@ -1,5 +1,6 @@
 import { format, isSameDay, startOfMonth, endOfMonth, eachDayOfInterval, min, max } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
+import { getAgendaTimeMode, isAgendaUnscheduled } from "./agenda-time";
 
 export interface TimelineBlockAgenda {
   type: "DAY_WITH_AGENDAS";
@@ -25,13 +26,13 @@ export function buildTimelineBlocks(
   rangeStart?: Date,
   rangeEnd?: Date
 ): { timelineBlocks: TimelineBlock[]; unscheduledAgendas: any[] } {
-  // 1. Separate scheduled vs unscheduled
+  // 1. Separate scheduled vs unscheduled using isAgendaUnscheduled
   const scheduledAgendas = agendas
-    .filter(a => a.scheduled_at && a.status !== "unscheduled" && a.time_mode !== "unscheduled")
+    .filter(a => !isAgendaUnscheduled(a))
     .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
   const unscheduledAgendas = agendas
-    .filter(a => !a.scheduled_at || a.status === "unscheduled" || a.time_mode === "unscheduled");
+    .filter(a => isAgendaUnscheduled(a));
 
   if (scheduledAgendas.length === 0) {
     return { timelineBlocks: [], unscheduledAgendas };
@@ -56,9 +57,14 @@ export function buildTimelineBlocks(
     let end = monthEnd;
 
     if (mode === "range" && rangeStart && rangeEnd) {
-      if (rangeEnd < monthStart || rangeStart > monthEnd) continue; // Outside range
-      start = max([monthStart, rangeStart]);
-      end = min([monthEnd, rangeEnd]);
+      const normalizedRangeStart = new Date(rangeStart);
+      normalizedRangeStart.setHours(0, 0, 0, 0);
+      const normalizedRangeEnd = new Date(rangeEnd);
+      normalizedRangeEnd.setHours(23, 59, 59, 999);
+
+      if (normalizedRangeEnd < monthStart || normalizedRangeStart > monthEnd) continue; // Outside range
+      start = max([monthStart, normalizedRangeStart]);
+      end = min([monthEnd, normalizedRangeEnd]);
     }
 
     if (start > end) continue;

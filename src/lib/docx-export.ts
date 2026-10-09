@@ -18,7 +18,7 @@ import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { Agenda } from "@/store/useStore";
 import { AppSettings } from "@/app/actions/settings";
-import { getAgendaTimeDisplay, getAgendaTimeMode } from "./agenda-time";
+import { getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "./agenda-time";
 import { buildTimelineBlocks } from "./agenda-timeline";
 import { getAgendaStatusLabel } from "./pdf-export";
 
@@ -53,12 +53,17 @@ export async function generateAgendaDocx({
   // Filter agendas for range if needed
   let filteredAgendas = [...agendas];
   if (mode === "range" && startDate && endDate) {
+    const startOfStartDate = new Date(startDate);
+    startOfStartDate.setHours(0, 0, 0, 0);
+    const endOfEndDate = new Date(endDate);
+    endOfEndDate.setHours(23, 59, 59, 999);
+
     filteredAgendas = filteredAgendas.filter(a => {
-      const timeMode = getAgendaTimeMode(a);
-      if (timeMode === "unscheduled") return false;
+      // Unscheduled agendas are always preserved for Section I
+      if (isAgendaUnscheduled(a)) return true;
       if (!a.scheduled_at) return false;
       const agendaDate = new Date(a.scheduled_at);
-      return agendaDate >= startDate && agendaDate <= endDate;
+      return agendaDate >= startOfStartDate && agendaDate <= endOfEndDate;
     });
   }
 
@@ -306,31 +311,14 @@ export async function generateAgendaDocx({
             ]
           }),
 
-          // Section I: Agenda Terjadwal
-          new Paragraph({
-            spacing: { before: 120, after: 120 },
-            children: [
-              new TextRun({
-                text: `I. TIMELINE AGENDA TERJADWAL (${timelineBlocks.reduce((acc, b) => acc + (b.type === "DAY_WITH_AGENDAS" ? b.agendas.length : 0), 0)} Agenda)`,
-                bold: true,
-                size: 22,
-                color: "0F172A"
-              })
-            ]
-          }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: tableRows
-          }),
-
-          // Section II: Unscheduled (if any)
+          // Section I: Belum Ada Tanggal / Unscheduled (if any) — always at the top
           ...(unscheduledAgendas.length > 0
             ? [
                 new Paragraph({
-                  spacing: { before: 360, after: 120 },
+                  spacing: { before: 120, after: 120 },
                   children: [
                     new TextRun({
-                      text: `II. BELUM ADA TANGGAL / UNSCHEDULED (${unscheduledAgendas.length} Agenda)`,
+                      text: `I. BELUM ADA TANGGAL / UNSCHEDULED (${unscheduledAgendas.length} Agenda)`,
                       bold: true,
                       size: 22,
                       color: "B45309"
@@ -340,9 +328,27 @@ export async function generateAgendaDocx({
                 new Table({
                   width: { size: 100, type: WidthType.PERCENTAGE },
                   rows: unscheduledTableRows
-                })
+                }),
+                new Paragraph({ spacing: { before: 240, after: 0 }, children: [] })
               ]
-            : [])
+            : []),
+
+          // Section II (or I if no unscheduled): Timeline Agenda Terjadwal
+          new Paragraph({
+            spacing: { before: 120, after: 120 },
+            children: [
+              new TextRun({
+                text: `${unscheduledAgendas.length > 0 ? "II" : "I"}. TIMELINE AGENDA TERJADWAL (${timelineBlocks.reduce((acc, b) => acc + (b.type === "DAY_WITH_AGENDAS" ? b.agendas.length : 0), 0)} Agenda)`,
+                bold: true,
+                size: 22,
+                color: "0F172A"
+              })
+            ]
+          }),
+          new Table({
+            width: { size: 100, type: WidthType.PERCENTAGE },
+            rows: tableRows
+          })
         ]
       }
     ]

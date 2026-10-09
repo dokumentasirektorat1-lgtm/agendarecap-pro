@@ -19,7 +19,7 @@ import { getAppSettings, AppSettings } from "@/app/actions/settings";
 import { useEffect } from "react";
 import ConnectivityBanner from "@/components/ConnectivityBanner";
 import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
-import { getAgendaTimeDisplay, getAgendaTimeMode } from "@/lib/agenda-time";
+import { getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "@/lib/agenda-time";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -34,6 +34,8 @@ export default function Dashboard() {
   const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
   const [isUnscheduledDrawerOpen, setIsUnscheduledDrawerOpen] = useState(false);
   const [isSystemMenuOpen, setIsSystemMenuOpen] = useState(false);
+  const [addModalInitialMode, setAddModalInitialMode] = useState<any>("exact");
+  const [addModalInitialStatus, setAddModalInitialStatus] = useState<'confirmed' | 'unscheduled'>('confirmed');
 
   const { agendas, sharedDates, toggleComplete, deleteAgenda, markAsShared, isLoading, error, fetchAgendas } = useStore();
 
@@ -64,11 +66,13 @@ export default function Dashboard() {
     }
   };
 
+  // isAgendaUnscheduled imported from @/lib/agenda-time
+
   const selectedAgendas = agendas
-    .filter((a) => isSameDay(new Date(a.scheduled_at), selectedDate) && a.status !== 'unscheduled')
+    .filter((a) => a.scheduled_at && !isAgendaUnscheduled(a) && isSameDay(new Date(a.scheduled_at), selectedDate))
     .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
-  const unscheduledAgendas = agendas.filter(a => a.status === 'unscheduled');
+  const unscheduledAgendas = agendas.filter(isAgendaUnscheduled);
 
   const [isCopied, setIsCopied] = useState(false);
 
@@ -225,13 +229,20 @@ export default function Dashboard() {
 
   const handleEdit = (agenda: Agenda) => {
     setEditingAgenda(agenda);
+    const mode = getAgendaTimeMode(agenda);
+    setAddModalInitialMode(mode);
+    setAddModalInitialStatus(agenda.status === 'unscheduled' || mode === 'unscheduled' ? 'unscheduled' : 'confirmed');
     setIsAddModalOpen(true);
   };
 
   const handleCloseModal = () => {
     setIsAddModalOpen(false);
     // Give time for animation before clearing edit state
-    setTimeout(() => setEditingAgenda(null), 300);
+    setTimeout(() => {
+      setEditingAgenda(null);
+      setAddModalInitialMode("exact");
+      setAddModalInitialStatus("confirmed");
+    }, 300);
   };
 
   // Calculate agenda density per date using unique canonical agenda IDs (taking ALL_DAY into account - Section 9 & 21)
@@ -452,7 +463,19 @@ export default function Dashboard() {
                   exit={{ height: 0, opacity: 0 }}
                   className="overflow-hidden"
                 >
-                  <div className="pt-4 flex flex-col gap-3 mt-2 border-t border-white/10 max-h-[300px] overflow-y-auto hide-scrollbar">
+                  <div className="pt-4 flex flex-col gap-3 mt-2 border-t border-white/10 max-h-[350px] overflow-y-auto hide-scrollbar">
+                    <button
+                      onClick={() => {
+                        setEditingAgenda(null);
+                        setAddModalInitialMode("unscheduled");
+                        setAddModalInitialStatus("unscheduled");
+                        setIsAddModalOpen(true);
+                      }}
+                      className="w-full py-2.5 px-3 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Tambah Agenda Belum Ada Tanggal</span>
+                    </button>
                     {unscheduledAgendas.length > 0 ? (
                       unscheduledAgendas.map(agenda => (
                         <div key={agenda.id} className="p-3 bg-white/5 border border-purple-500/10 rounded-xl hover:bg-white/10 transition-colors flex justify-between items-start gap-3">
@@ -729,7 +752,12 @@ export default function Dashboard() {
 
               {/* Tambah Baru Button */}
               <button
-                onClick={() => setIsAddModalOpen(true)}
+                onClick={() => {
+                  setEditingAgenda(null);
+                  setAddModalInitialMode("exact");
+                  setAddModalInitialStatus("confirmed");
+                  setIsAddModalOpen(true);
+                }}
                 className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/20 px-4 py-2.5 rounded-xl font-semibold transition-all hover:opacity-90 active:scale-95 border-0 text-sm shrink-0"
               >
                 <Plus className="w-4 h-4" />
@@ -938,6 +966,8 @@ export default function Dashboard() {
         onClose={handleCloseModal}
         defaultDate={selectedDate || new Date()}
         editAgenda={editingAgenda}
+        initialTimeMode={addModalInitialMode}
+        initialStatus={addModalInitialStatus}
       />
 
       <ExportAgendaModal

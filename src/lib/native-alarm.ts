@@ -59,6 +59,19 @@ export interface NativeAlarmPluginInterface {
   updateConsultationWidgetData(options: { items: Array<{ title: string; notes?: string; count?: number }> }): Promise<{ success: boolean }>;
 
   updateAgenda7DaysWidgetData(options: { items: Array<{ title: string; time: string; date: string }> }): Promise<{ success: boolean }>;
+
+  saveAndOpenFile(options: {
+    fileName: string;
+    base64Data: string;
+    mimeType?: string;
+    openFile?: boolean;
+  }): Promise<{ success: boolean; fileName?: string; savedLocation?: string }>;
+
+  saveCustomSound(options: {
+    base64Data: string;
+    fileName?: string;
+    mimeType?: string;
+  }): Promise<{ success: boolean; soundUri?: string; soundName?: string }>;
 }
 
 const getNativeAlarmPlugin = (): NativeAlarmPluginInterface => {
@@ -509,5 +522,34 @@ export async function updateNativeAgenda7DaysWidgetData(items: Array<{ title: st
   } catch (err) {
     console.warn('[NATIVE ALARM] updateAgenda7DaysWidgetData notice:', err);
     return false;
+  }
+}
+
+export async function saveAndOpenFileNative(options: {
+  fileName: string;
+  base64Data: string;
+  mimeType?: string;
+  openFile?: boolean;
+}): Promise<{ success: boolean; fileName?: string; savedLocation?: string }> {
+  if (!isNativePlatform()) return { success: false };
+  try {
+    return await NativeAlarm.saveAndOpenFile(options);
+  } catch (err) {
+    console.error('[NATIVE FILE SAVE] Failed to save file:', err);
+    throw err;
+  }
+}
+
+export async function saveCustomSoundNative(options: {
+  base64Data: string;
+  fileName?: string;
+  mimeType?: string;
+}): Promise<{ success: boolean; soundUri?: string; soundName?: string }> {
+  if (!isNativePlatform()) return { success: false };
+  try {
+    return await NativeAlarm.saveCustomSound(options);
+  } catch (err) {
+    console.error('[NATIVE SOUND SAVE] Failed to save custom sound:', err);
+    throw err;
   }
 }

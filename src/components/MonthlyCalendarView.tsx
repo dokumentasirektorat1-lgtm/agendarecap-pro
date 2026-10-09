@@ -53,6 +53,9 @@ export function MonthlyCalendarView({ currentDate, onDateClick, onEditAgenda }: 
     // Collision check
     const isConflict = agendas.some(a => 
       a.id !== agenda.id && 
+      a.status !== 'unscheduled' &&
+      a.time_mode !== 'unscheduled' &&
+      a.scheduled_at &&
       isSameDay(new Date(a.scheduled_at), targetDate)
     );
 
@@ -91,8 +94,10 @@ export function MonthlyCalendarView({ currentDate, onDateClick, onEditAgenda }: 
       formattedDate = format(day, dateFormat);
       const cloneDay = day;
       
-      const dayAgendas = agendas.filter(a => isSameDay(new Date(a.scheduled_at), cloneDay))
-        .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
+      const dayAgendas = agendas.filter(a => {
+        if (a.status === 'unscheduled' || a.time_mode === 'unscheduled' || !a.scheduled_at) return false;
+        return isSameDay(new Date(a.scheduled_at), cloneDay);
+      }).sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime());
 
       days.push(
         <div

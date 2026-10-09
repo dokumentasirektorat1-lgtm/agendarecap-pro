@@ -28,13 +28,15 @@ import { generateAgendaDocx } from "@/lib/docx-export";
 import { generateAgendaExcel } from "@/lib/excel-export";
 import { 
   downloadAgendaBackup, 
+  getAgendaBackupData,
   validateAndAnalyzeBackup, 
   executeRestoreBackup, 
   BackupSummary 
 } from "@/lib/backup-service";
 
-import { getAgendaTimeDisplay } from "@/lib/agenda-time";
+import { getAgendaTimeDisplay, isAgendaUnscheduled } from "@/lib/agenda-time";
 import { getAppName } from "@/lib/branding";
+import { isNativePlatform, saveAndOpenFileNative } from "@/lib/native-alarm";
 import * as XLSX from "xlsx";
 
 interface ExportAgendaModalProps {
@@ -59,18 +61,31 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
 
   const appName = getAppName(appSettings);
 
-  const handleExportPDF = () => {
-    let filteredAgendas = [...agendas];
+  const parseRangeDates = () => {
+    const [sy, sm, sd] = startDate.split("-").map(Number);
+    const rangeStartDate = new Date(sy, sm - 1, sd, 0, 0, 0, 0);
+    const [ey, em, ed] = endDate.split("-").map(Number);
+    const rangeEndDate = new Date(ey, em - 1, ed, 23, 59, 59, 999);
+    return { rangeStartDate, rangeEndDate };
+  };
 
+  const getFilteredAgendasForExport = () => {
+    let list = [...agendas];
     if (exportType === "range") {
-      const start = startOfDay(new Date(startDate));
-      const end = endOfDay(new Date(endDate));
-      filteredAgendas = filteredAgendas.filter(a => {
+      const { rangeStartDate, rangeEndDate } = parseRangeDates();
+      list = list.filter(a => {
+        // Agenda unscheduled (Belum Ada Tanggal) SELALU dimasukkan untuk Section I
+        if (isAgendaUnscheduled(a)) return true;
         if (!a.scheduled_at) return false;
-        const date = new Date(a.scheduled_at);
-        return isWithinInterval(date, { start, end });
+        const d = new Date(a.scheduled_at);
+        return d >= rangeStartDate && d <= rangeEndDate;
       });
     }
+    return list;
+  };
+
+  const handleExportPDF = async () => {
+    const filteredAgendas = getFilteredAgendasForExport();
 
     if (filteredAgendas.length === 0) {
       Swal.fire({
@@ -85,47 +100,64 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
       return;
     }
 
+    const { rangeStartDate, rangeEndDate } = parseRangeDates();
     const doc = generateAgendaPDF({
       agendas: filteredAgendas,
       title: exportType === "all" ? "REKAP SELURUH AGENDA" : "REKAP AGENDA RENTANG WAKTU",
-      subtitle: exportType === "all" ? `Mode: Seluruh Agenda` : `Periode: ${format(new Date(startDate), "dd MMM yyyy", { locale: id })} s/d ${format(new Date(endDate), "dd MMM yyyy", { locale: id })}`,
+      subtitle: exportType === "all" ? `Mode: Seluruh Agenda` : `Periode: ${format(rangeStartDate, "dd MMM yyyy", { locale: id })} s/d ${format(rangeEndDate, "dd MMM yyyy", { locale: id })}`,
       appSettings,
       mode: exportType === "all" ? "full" : "range",
-      startDate: new Date(startDate),
-      endDate: new Date(endDate)
+      startDate: rangeStartDate,
+      endDate: rangeEndDate
     });
 
     const fileName = exportType === "all"
       ? `Rekap_Agenda_Full_${format(new Date(), "yyyyMMdd")}.pdf`
-      : `Rekap_Agenda_Range_${format(new Date(startDate), "yyyyMMdd")}-${format(new Date(endDate), "yyyyMMdd")}.pdf`;
+      : `Rekap_Agenda_Range_${format(rangeStartDate, "yyyyMMdd")}-${format(rangeEndDate, "yyyyMMdd")}.pdf`;
 
-    doc.save(fileName);
+    try {
+      if (isNativePlatform()) {
+        const base64Data = doc.output("datauristring").split(",")[1];
+        await saveAndOpenFileNative({
+          fileName,
+          base64Data,
+          mimeType: "application/pdf",
+          openFile: true
+        });
 
-    Swal.fire({
-      icon: "success",
-      title: "Berhasil Export PDF!",
-      text: `File PDF (${fileName}) telah diunduh.`,
-      timer: 2000,
-      showConfirmButton: false,
-      toast: true,
-      position: "top-end"
-    });
-
-    onClose();
+        Swal.fire({
+          icon: "success",
+          title: "Berhasil Export PDF!",
+          text: `File PDF (${fileName}) tersimpan di folder Download perangkat Anda.`,
+          timer: 3500,
+          showConfirmButton: true,
+          confirmButtonText: "Selesai"
+        });
+      } else {
+        doc.save(fileName);
+        Swal.fire({
+          icon: "success",
+          title: "Berhasil Export PDF!",
+          text: `File PDF (${fileName}) telah diunduh.`,
+          timer: 2000,
+          showConfirmButton: false,
+          toast: true,
+          position: "top-end"
+        });
+      }
+      onClose();
+    } catch (err: any) {
+      console.error("Gagal menyimpan PDF:", err);
+      Swal.fire({
+        icon: "error",
+        title: "Gagal Menyimpan PDF",
+        text: err.message || "Terjadi kesalahan saat menyimpan file PDF."
+      });
+    }
   };
 
   const handleExportWord = async () => {
-    let filteredAgendas = [...agendas];
-
-    if (exportType === "range") {
-      const start = startOfDay(new Date(startDate));
-      const end = endOfDay(new Date(endDate));
-      filteredAgendas = filteredAgendas.filter(a => {
-        if (!a.scheduled_at) return false;
-        const date = new Date(a.scheduled_at);
-        return isWithinInterval(date, { start, end });
-      });
-    }
+    const filteredAgendas = getFilteredAgendasForExport();
 
     if (filteredAgendas.length === 0) {
       Swal.fire({
@@ -141,38 +173,64 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
     }
 
     try {
+      const { rangeStartDate, rangeEndDate } = parseRangeDates();
       const blob = await generateAgendaDocx({
         agendas: filteredAgendas,
         title: exportType === "all" ? "REKAP SELURUH AGENDA" : "REKAP AGENDA RENTANG WAKTU",
-        subtitle: exportType === "all" ? `Mode: Seluruh Agenda` : `Periode: ${format(new Date(startDate), "dd MMM yyyy", { locale: id })} s/d ${format(new Date(endDate), "dd MMM yyyy", { locale: id })}`,
+        subtitle: exportType === "all" ? `Mode: Seluruh Agenda` : `Periode: ${format(rangeStartDate, "dd MMM yyyy", { locale: id })} s/d ${format(rangeEndDate, "dd MMM yyyy", { locale: id })}`,
         appSettings,
         mode: exportType === "all" ? "full" : "range",
-        startDate: new Date(startDate),
-        endDate: new Date(endDate)
+        startDate: rangeStartDate,
+        endDate: rangeEndDate
       });
 
       const fileName = exportType === "all"
         ? `Rekap_Agenda_Full_${format(new Date(), "yyyyMMdd")}.docx`
-        : `Rekap_Agenda_Range_${format(new Date(startDate), "yyyyMMdd")}-${format(new Date(endDate), "yyyyMMdd")}.docx`;
+        : `Rekap_Agenda_Range_${format(rangeStartDate, "yyyyMMdd")}-${format(rangeEndDate, "yyyyMMdd")}.docx`;
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      if (isNativePlatform()) {
+        const arrayBuffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Data = btoa(binary);
+        await saveAndOpenFileNative({
+          fileName,
+          base64Data,
+          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          openFile: true
+        });
 
-      Swal.fire({
-        icon: "success",
-        title: "Berhasil Export Word!",
-        text: `Dokumen Word (${fileName}) telah diunduh.`,
-        timer: 2000,
-        showConfirmButton: false,
-        toast: true,
-        position: "top-end"
-      });
+        Swal.fire({
+          icon: "success",
+          title: "Berhasil Export Word!",
+          text: `Dokumen Word (${fileName}) tersimpan di folder Download perangkat Anda.`,
+          timer: 3500,
+          showConfirmButton: true,
+          confirmButtonText: "Selesai"
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        Swal.fire({
+          icon: "success",
+          title: "Berhasil Export Word!",
+          text: `Dokumen Word (${fileName}) telah diunduh.`,
+          timer: 2000,
+          showConfirmButton: false,
+          toast: true,
+          position: "top-end"
+        });
+      }
 
       onClose();
     } catch (e: any) {
@@ -185,18 +243,8 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
     }
   };
 
-  const handleExportExcel = () => {
-    let filteredAgendas = [...agendas];
-
-    if (exportType === "range") {
-      const start = startOfDay(new Date(startDate));
-      const end = endOfDay(new Date(endDate));
-      filteredAgendas = filteredAgendas.filter(a => {
-        if (!a.scheduled_at) return false;
-        const date = new Date(a.scheduled_at);
-        return isWithinInterval(date, { start, end });
-      });
-    }
+  const handleExportExcel = async () => {
+    const filteredAgendas = getFilteredAgendasForExport();
 
     if (filteredAgendas.length === 0) {
       Swal.fire({
@@ -212,25 +260,46 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
     }
 
     try {
-      const { fileName } = generateAgendaExcel({
+      const { rangeStartDate, rangeEndDate } = parseRangeDates();
+      const { fileName, workbook } = generateAgendaExcel({
         agendas: filteredAgendas,
         title: exportType === "all" ? "REKAP SELURUH AGENDA" : "REKAP AGENDA RENTANG WAKTU",
-        subtitle: exportType === "all" ? `Mode: Seluruh Agenda` : `Periode: ${format(new Date(startDate), "dd MMM yyyy", { locale: id })} s/d ${format(new Date(endDate), "dd MMM yyyy", { locale: id })}`,
+        subtitle: exportType === "all" ? `Mode: Seluruh Agenda` : `Periode: ${format(rangeStartDate, "dd MMM yyyy", { locale: id })} s/d ${format(rangeEndDate, "dd MMM yyyy", { locale: id })}`,
         appSettings,
         mode: exportType === "all" ? "full" : "range",
-        startDate: new Date(startDate),
-        endDate: new Date(endDate)
+        startDate: rangeStartDate,
+        endDate: rangeEndDate
       });
 
-      Swal.fire({
-        icon: "success",
-        title: "Berhasil Export Excel!",
-        text: `File spreadsheet (${fileName}) telah diunduh.`,
-        timer: 2000,
-        showConfirmButton: false,
-        toast: true,
-        position: "top-end"
-      });
+      if (isNativePlatform()) {
+        const base64Data = XLSX.write(workbook, { bookType: "xlsx", type: "base64" });
+        await saveAndOpenFileNative({
+          fileName,
+          base64Data,
+          mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          openFile: true
+        });
+
+        Swal.fire({
+          icon: "success",
+          title: "Berhasil Export Excel!",
+          text: `File spreadsheet (${fileName}) tersimpan di folder Download perangkat Anda.`,
+          timer: 3500,
+          showConfirmButton: true,
+          confirmButtonText: "Selesai"
+        });
+      } else {
+        XLSX.writeFile(workbook, fileName);
+        Swal.fire({
+          icon: "success",
+          title: "Berhasil Export Excel!",
+          text: `File spreadsheet (${fileName}) telah diunduh.`,
+          timer: 2000,
+          showConfirmButton: false,
+          toast: true,
+          position: "top-end"
+        });
+      }
 
       onClose();
     } catch (e: any) {
@@ -243,7 +312,7 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
     }
   };
 
-  const handleDownloadBackup = () => {
+  const handleDownloadBackup = async () => {
     if (agendas.length === 0) {
       Swal.fire({
         icon: "warning",
@@ -257,17 +326,47 @@ export function ExportAgendaModal({ isOpen, onClose, appSettings }: ExportAgenda
       return;
     }
 
-    const fileName = downloadAgendaBackup(agendas, appSettings);
-    Swal.fire({
-      icon: "success",
-      title: "Backup Berhasil Dibuat!",
-      text: `File cadangan data (${fileName}) telah diunduh ke perangkat Anda.`,
-      timer: 2500,
-      showConfirmButton: false,
-      toast: true,
-      position: "top-end"
-    });
-    onClose();
+    try {
+      const { fileName, jsonString } = getAgendaBackupData(agendas, appSettings);
+
+      if (isNativePlatform()) {
+        const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
+        await saveAndOpenFileNative({
+          fileName,
+          base64Data,
+          mimeType: "application/json",
+          openFile: true
+        });
+
+        Swal.fire({
+          icon: "success",
+          title: "Backup Berhasil Dibuat!",
+          text: `File cadangan (${fileName}) tersimpan di folder Download perangkat Anda.`,
+          timer: 3500,
+          showConfirmButton: true,
+          confirmButtonText: "Selesai"
+        });
+      } else {
+        downloadAgendaBackup(agendas, appSettings);
+        Swal.fire({
+          icon: "success",
+          title: "Backup Berhasil Dibuat!",
+          text: `File cadangan data (${fileName}) telah diunduh ke perangkat Anda.`,
+          timer: 2500,
+          showConfirmButton: false,
+          toast: true,
+          position: "top-end"
+        });
+      }
+      onClose();
+    } catch (err: any) {
+      console.error("Gagal membuat backup:", err);
+      Swal.fire({
+        icon: "error",
+        title: "Gagal Membuat Backup",
+        text: err.message || "Terjadi kesalahan saat membuat file backup."
+      });
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

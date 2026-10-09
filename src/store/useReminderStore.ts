@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 import { IDBReminder, IDBOccurrence } from "@/lib/idb";
 import { reminderRepository } from "@/lib/repositories/reminder-repository";
 import { syncRepository } from "@/lib/repositories/sync-repository";
-import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm, updateNativeWidgetData } from "@/lib/native-alarm";
+import { isNativePlatform, scheduleNativeLocalAlarm, cancelNativeLocalAlarm } from "@/lib/native-alarm";
 
 export type Frequency = "once" | "daily" | "weekdays" | "weekly";
 export type OccurrenceStatus = "scheduled" | "processing" | "sent" | "snoozed" | "completed" | "dismissed" | "cancelled" | "failed";
@@ -89,13 +89,7 @@ export const useReminderStore = create<ReminderStoreState>()(
 
           set({ reminders: mapped, occurrences: localOccurrences });
 
-          if (isNativePlatform()) {
-            const activeItems = mapped
-              .filter(r => r.isActive && r.currentOccurrence?.status !== 'completed' && r.currentOccurrence?.status !== 'dismissed')
-              .slice(0, 3)
-              .map(r => ({ title: r.title, time: r.time || '08:00' }));
-            updateNativeWidgetData(activeItems);
-          }
+
 
           // 2. Background Sync if online
           if (typeof navigator !== 'undefined' && navigator.onLine) {
@@ -114,13 +108,7 @@ export const useReminderStore = create<ReminderStoreState>()(
 
             set({ reminders: updatedMapped, occurrences: updatedOccurrences, dbSynced: true, isOffline: false });
 
-            if (isNativePlatform()) {
-              const activeItems = updatedMapped
-                .filter(r => r.isActive && r.currentOccurrence?.status !== 'completed' && r.currentOccurrence?.status !== 'dismissed')
-                .slice(0, 3)
-                .map(r => ({ title: r.title, time: r.time || '08:00' }));
-              updateNativeWidgetData(activeItems);
-            }
+
           } else {
             set({ isOffline: true });
           }

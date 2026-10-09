@@ -3,7 +3,7 @@ import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { Agenda } from "@/store/useStore";
 import { AppSettings } from "@/app/actions/settings";
-import { getAgendaTimeDisplay, getAgendaTimeMode } from "./agenda-time";
+import { getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "./agenda-time";
 import { buildTimelineBlocks } from "./agenda-timeline";
 import { getAgendaStatusLabel } from "./pdf-export";
 import { getAppName } from "./branding";
@@ -39,12 +39,17 @@ export function generateAgendaExcel({
   // Filter agendas for range if needed
   let filteredAgendas = [...agendas];
   if (mode === "range" && startDate && endDate) {
+    const startOfStartDate = new Date(startDate);
+    startOfStartDate.setHours(0, 0, 0, 0);
+    const endOfEndDate = new Date(endDate);
+    endOfEndDate.setHours(23, 59, 59, 999);
+
     filteredAgendas = filteredAgendas.filter(a => {
-      const timeMode = getAgendaTimeMode(a);
-      if (timeMode === "unscheduled") return false;
+      // Unscheduled agendas are always preserved for Section I
+      if (isAgendaUnscheduled(a)) return true;
       if (!a.scheduled_at) return false;
       const agendaDate = new Date(a.scheduled_at);
-      return agendaDate >= startDate && agendaDate <= endDate;
+      return agendaDate >= startOfStartDate && agendaDate <= endOfEndDate;
     });
   }
 
@@ -67,6 +72,30 @@ export function generateAgendaExcel({
 
   let seqNo = 1;
 
+  // Section I: Unscheduled agendas first (at the top)
+  if (unscheduledAgendas.length > 0) {
+    sheetData.push(["=== I. BELUM ADA TANGGAL / UNSCHEDULED ==="]);
+    for (const agenda of unscheduledAgendas) {
+      const loc = agenda.isOnline && agenda.onlineLink ? `Online (${agenda.onlineLink})` : (agenda.location || "-");
+      const notes = agenda.notes ? agenda.notes.trim() : "-";
+      const status = getAgendaStatusLabel(agenda.status);
+
+      sheetData.push([
+        seqNo++,
+        "Belum Ada Tanggal",
+        "Belum Ada Tanggal",
+        agenda.title,
+        loc,
+        notes,
+        status
+      ]);
+    }
+    sheetData.push([]); // blank separator
+  }
+
+  // Section II (or I if no unscheduled): Scheduled timeline
+  sheetData.push([`=== ${unscheduledAgendas.length > 0 ? "II" : "I"}. TIMELINE AGENDA TERJADWAL ===`]);
+
   for (const block of timelineBlocks) {
     if (block.type === "DAY_WITH_AGENDAS") {
       const dateStr = format(block.date, "EEEE, d MMMM yyyy", { locale: idLocale });
@@ -87,7 +116,6 @@ export function generateAgendaExcel({
         ]);
       }
     } else if (block.type === "EMPTY_DAYS_GROUP") {
-      // Empty days placeholder row
       sheetData.push([
         "-",
         block.formattedHeader,
@@ -96,27 +124,6 @@ export function generateAgendaExcel({
         "-",
         block.note || "-",
         "-"
-      ]);
-    }
-  }
-
-  // Append unscheduled agendas if any
-  if (unscheduledAgendas.length > 0) {
-    sheetData.push([]);
-    sheetData.push(["AGENDA BELUM ADA TANGGAL"]);
-    for (const agenda of unscheduledAgendas) {
-      const loc = agenda.isOnline && agenda.onlineLink ? `Online (${agenda.onlineLink})` : (agenda.location || "-");
-      const notes = agenda.notes ? agenda.notes.trim() : "-";
-      const status = getAgendaStatusLabel(agenda.status);
-
-      sheetData.push([
-        seqNo++,
-        "Belum Ditentukan",
-        "Fleksibel",
-        agenda.title,
-        loc,
-        notes,
-        status
       ]);
     }
   }
