@@ -16,7 +16,7 @@ import {
   stopNativeAudioPreview,
   saveCustomSoundNative
 } from "@/lib/native-alarm";
-import { setAppBranding, updateDocumentTitle } from "@/lib/branding";
+import { setAppBranding, updateDocumentTitle, DEFAULT_APP_NAME } from "@/lib/branding";
 
 interface SettingsFormProps {
   initialSettings?: Partial<AppSettings>;
@@ -33,10 +33,10 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
   const [isPending, startTransition] = useTransition();
   const [successMsg, setSuccessMsg] = useState("");
 
-  const [appName, setAppName] = useState(initialSettings?.app_name || "AgendaRecap");
+  const [appName, setAppName] = useState(initialSettings?.app_name || DEFAULT_APP_NAME);
   const [appLogo, setAppLogo] = useState(initialSettings?.app_logo || "");
   const [isWatermark, setIsWatermark] = useState(initialSettings?.is_watermark_enabled ?? true);
-  const [watermarkText, setWatermarkText] = useState(initialSettings?.watermark_text || "Dibuat oleh AgendaRecap Pro");
+  const [watermarkText, setWatermarkText] = useState(initialSettings?.watermark_text || `Dibuat oleh ${DEFAULT_APP_NAME}`);
 
   // Notification Sound State
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);

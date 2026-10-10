@@ -91,6 +91,10 @@ public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.agenda_7days_widget);
         int offset = getCurrentOffset(context);
 
+        // Dynamic app branding
+        String appName = NativeAlarmPlugin.getSavedAppName(context);
+        views.setTextViewText(R.id.agenda7_widget_label, appName.toUpperCase());
+
         // Tap on widget → open main app
         Intent mainIntent = new Intent(context, MainActivity.class);
         PendingIntent mainPendingIntent = PendingIntent.getActivity(

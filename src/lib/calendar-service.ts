@@ -1,5 +1,6 @@
 // Calendar Integration Service
 // Exports iCalendar (.ics) and direct Google Calendar Links for Reminder Events
+import { DEFAULT_APP_NAME } from "@/lib/branding";
 
 export interface CalendarEventInput {
   title: string;
@@ -40,7 +41,7 @@ export function downloadICSFile(event: CalendarEventInput): void {
   const icsContent = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//AgendaRecap Pro//Reminder Engine//ID',
+    `PRODID:-//${DEFAULT_APP_NAME}//Reminder Engine//ID`,
     'BEGIN:VEVENT',
     `UID:agenda-${Date.now()}@agendarecap.com`,
     `DTSTAMP:${formatCalDate(new Date())}`,

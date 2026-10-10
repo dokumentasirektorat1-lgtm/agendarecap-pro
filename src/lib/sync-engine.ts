@@ -15,14 +15,11 @@ export async function runSyncEngine(): Promise<{ success: boolean; syncedCount: 
   
   if (typeof window !== 'undefined') {
     try {
-      // Reload Zustand stores from updated IndexedDB after sync
       const { useStore } = await import('@/store/useStore');
+      // Re-fetch via the store's own fetchAgendas to ensure deduplication + widget refresh
+      await useStore.getState().fetchAgendas();
+
       const { useReminderStore } = await import('@/store/useReminderStore');
-      const { agendaRepository } = await import('@/lib/repositories/agenda-repository');
-      
-      const localAgendas = await agendaRepository.getLocal();
-      useStore.setState({ agendas: localAgendas as any[] });
-      
       await useReminderStore.getState().fetchReminders();
     } catch (err) {
       console.warn('[SYNC ENGINE] Post-sync store reload notice:', err);

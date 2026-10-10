@@ -1,6 +1,7 @@
 import { AppSettings } from "@/app/actions/settings";
 import { format, addDays, startOfWeek, isSameDay } from "date-fns";
 import { getAgendaTimeDisplay } from "@/lib/agenda-time";
+import { DEFAULT_APP_NAME } from "@/lib/branding";
 
 export interface AgendaItem {
   id: string;
@@ -44,7 +45,7 @@ export function formatAgendasToWhatsApp(
   const toCapitalizeAll = (str: string) => 
     str.toLowerCase().replace(/(?:^|\s)\S/g, (a) => a.toUpperCase());
 
-  const appName = settings?.app_name ? toCapitalizeAll(settings.app_name) : 'Agenda Recap';
+  const appName = settings?.app_name ? toCapitalizeAll(settings.app_name) : toCapitalizeAll(DEFAULT_APP_NAME);
   const isWatermarkEnabled = settings?.is_watermark_enabled ?? true;
   const watermarkText = settings?.watermark_text 
     ? toCapitalizeAll(settings.watermark_text) 
