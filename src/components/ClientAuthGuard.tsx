@@ -7,6 +7,7 @@ import { User, Session } from "@supabase/supabase-js";
 import { CalendarHeart, RefreshCw } from "lucide-react";
 
 import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
+import { getAppName, DEFAULT_APP_NAME } from "@/lib/branding";
 
 export type AuthState = 'INITIALIZING' | 'AUTHENTICATED' | 'UNAUTHENTICATED';
 
@@ -60,6 +61,13 @@ export default function ClientAuthGuard({ children }: { children: React.ReactNod
   const [pendingQueueCount, setPendingQueueCount] = useState(0);
   const [failedQueueCount, setFailedQueueCount] = useState(0);
   const [lastAuthEvent, setLastAuthEvent] = useState('INITIALIZING');
+  // Initialize with DEFAULT_APP_NAME so SSR and first client render match,
+  // then read the localStorage-cached name after hydration.
+  const [appName, setAppName] = useState(DEFAULT_APP_NAME);
+
+  useEffect(() => {
+    setAppName(getAppName());
+  }, []);
 
   const pathname = usePathname();
   const router = useRouter();
@@ -308,7 +316,7 @@ function getLocalCachedSession(): Session | null {
             <CalendarHeart className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h2 className="text-xl font-bold text-white mb-1">AgendaRecap Pro</h2>
+            <h2 className="text-xl font-bold text-white mb-1">{appName}</h2>
             <p className="text-xs text-zinc-400 font-medium">Memverifikasi Sesi Otentikasi...</p>
           </div>
           <div className="flex items-center gap-2 text-xs text-purple-400 font-semibold bg-purple-500/10 px-4 py-2 rounded-xl border border-purple-500/20">

@@ -10,8 +10,8 @@ export async function GET(request: Request) {
     name = url.searchParams.get("name") || name;
   } catch (e) {}
 
-  // Use the provided logo or a fallback default icon
-  const iconUrl = logo || "/icon-512x512.png";
+  // Use the provided logo or an existing fallback default icon
+  const iconUrl = logo || "/icons/icon-192.png";
 
   const manifest = {
     name: name,

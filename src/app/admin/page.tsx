@@ -5,6 +5,7 @@ import { Users, Shield, Trash2, RefreshCw, ChevronLeft, CheckCircle2, AlertCircl
 import Link from "next/link";
 import { useState, useEffect, useTransition } from "react";
 import { getUsers, deleteUser, resetUserPassword, approveUser } from "@/app/actions/admin";
+import { getAppName } from "@/lib/branding";
 import Swal from "sweetalert2";
 
 interface UserProfile {
@@ -122,7 +123,7 @@ export default function AdminDashboard() {
                 <Shield className="w-6 h-6 text-blue-400" />
                 Admin Panel
               </h1>
-              <p className="text-sm text-zinc-400">Manajemen Pengguna AgendaRecap Pro</p>
+              <p className="text-sm text-zinc-400">Manajemen Pengguna {getAppName()}</p>
             </div>
           </div>
         </header>

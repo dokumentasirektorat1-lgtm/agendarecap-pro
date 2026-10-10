@@ -2,6 +2,7 @@ import { Agenda } from "@/store/useStore";
 import { AppSettings } from "@/app/actions/settings";
 import { agendaRepository } from "./repositories/agenda-repository";
 import { format } from "date-fns";
+import { getAppName } from "./branding";
 
 export interface BackupDataStructure {
   format: "AGENDARECAP_BACKUP";
@@ -25,7 +26,7 @@ export interface BackupSummary {
  * Generates and downloads a clean, structured JSON backup file of all agendas.
  */
 export function getAgendaBackupData(agendas: Agenda[], appSettings?: AppSettings | null) {
-  const appName = appSettings?.app_name || "AgendaRecap Pro";
+  const appName = getAppName(appSettings);
   const now = new Date();
   
   const backupObject: BackupDataStructure = {

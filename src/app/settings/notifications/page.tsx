@@ -18,6 +18,7 @@ import {
   stopNativeAudioPreview,
   saveCustomSoundNative
 } from "@/lib/native-alarm";
+import { getAppName } from "@/lib/branding";
 
 export default function NotificationSettingsPage() {
   const [platformInfo, setPlatformInfo] = useState<string>("");
@@ -723,14 +724,14 @@ export default function NotificationSettingsPage() {
                     toast: true,
                     position: 'top-end',
                     icon: 'info',
-                    title: 'Aplikasi AgendaRecap Pro sudah berjalan di perangkat Android Native.',
+                    title: `Aplikasi ${getAppName()} sudah berjalan di perangkat Android Native.`,
                     showConfirmButton: false,
                     timer: 3000
                   });
                 }
               }}
               className="px-4 py-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-black shadow-lg shadow-emerald-500/10"
-              title="Download File APK Android AgendaRecap Pro"
+              title={`Download File APK Android ${getAppName()}`}
             >
               <Download className="w-4 h-4 text-emerald-400" />
               <span>DOWNLOAD APK</span>

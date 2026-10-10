@@ -6,6 +6,7 @@ import { Agenda } from "@/store/useStore";
 import { AppSettings } from "@/app/actions/settings";
 import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "./agenda-time";
 import { buildTimelineBlocks, TimelineBlock } from "./agenda-timeline";
+import { getAppName } from "./branding";
 
 export interface PDFExportOptions {
   agendas: Agenda[];
@@ -50,7 +51,7 @@ export function generateAgendaPDF({
     format: "a4"
   });
 
-  const appName = appSettings?.app_name || "AgendaRecap Pro";
+  const appName = getAppName(appSettings);
   const docTitle = title || (mode === "range" ? "REKAP AGENDA RENTANG WAKTU" : "REKAP AGENDA SELURUHNYA");
   const exportTimestamp = format(new Date(), "d MMMM yyyy, HH:mm", { locale: idLocale });
 

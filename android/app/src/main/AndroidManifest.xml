@@ -63,11 +63,12 @@
             </intent-filter>
         </receiver>
 
-        <!-- Home Screen Widget Receiver (Agenda Terdekat) -->
+        <!-- Home Screen Widget Receiver (Agenda Terdekat - Legacy / Disabled so only 2 official widgets are presented) -->
         <receiver
             android:name=".AgendaWidgetProvider"
-            android:label="AgendaRecap Terdekat"
-            android:exported="true">
+            android:label="Agenda Terdekat"
+            android:enabled="false"
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -76,10 +77,10 @@
                 android:resource="@xml/agenda_widget_info" />
         </receiver>
 
-        <!-- Consultation Widget -->
+        <!-- Widget 1: Consultation Widget -->
         <receiver
             android:name=".ConsultationWidgetProvider"
-            android:label="AgendaRecap Konsultasi"
+            android:label="Agenda Konsultasi"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -89,10 +90,10 @@
                 android:resource="@xml/consultation_widget_info" />
         </receiver>
 
-        <!-- Agenda 7 Days Widget -->
+        <!-- Widget 2: Agenda 7 Days Widget -->
         <receiver
             android:name=".Agenda7DaysWidgetProvider"
-            android:label="AgendaRecap 7 Hari"
+            android:label="Agenda 7 Hari"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />

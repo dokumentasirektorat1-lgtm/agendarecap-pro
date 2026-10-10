@@ -16,6 +16,7 @@ import {
   stopNativeAudioPreview,
   saveCustomSoundNative
 } from "@/lib/native-alarm";
+import { setAppBranding, updateDocumentTitle } from "@/lib/branding";
 
 interface SettingsFormProps {
   initialSettings?: Partial<AppSettings>;
@@ -157,6 +158,8 @@ export function SettingsForm({ initialSettings }: SettingsFormProps) {
       });
 
       if (res.success) {
+        setAppBranding({ app_name: appName, app_logo: appLogo });
+        updateDocumentTitle(undefined, { app_name: appName });
         setSuccessMsg("Pengaturan berhasil disimpan.");
         Swal.fire({
           icon: 'success',

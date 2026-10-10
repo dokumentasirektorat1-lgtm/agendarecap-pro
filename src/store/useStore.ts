@@ -132,6 +132,7 @@ type StoreState = {
   addAgenda: (agenda: Omit<Agenda, "id" | "is_completed" | "updated_at">) => Promise<boolean>;
   toggleComplete: (id: string) => Promise<void>;
   deleteAgenda: (id: string) => Promise<boolean>;
+  deleteGroup: (groupId: string) => Promise<boolean>;
   updateAgenda: (id: string, updates: Partial<Agenda>) => Promise<boolean>;
   markAsShared: (dateKey: string, timestamp: string) => void;
   subscribeRealtime: () => () => void;
@@ -263,6 +264,26 @@ export const useStore = create<StoreState>((set, get) => {
         title: 'Gagal Menghapus',
         text: error.message || 'Gagal menghapus data dari penyimpanan lokal.'
       });
+      return false;
+    }
+  },
+
+  deleteGroup: async (groupId: string) => {
+    try {
+      const toDelete = get().agendas.filter(a => a.groupId === groupId);
+      for (const a of toDelete) {
+        await agendaRepository.delete(a.id);
+      }
+      set(state => ({
+        agendas: deduplicateAgendas(state.agendas.filter(a => a.groupId !== groupId))
+      }));
+      syncWidgetData(get().agendas);
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        syncRepository.runSync().catch(err => console.warn("Background sync error:", err));
+      }
+      return true;
+    } catch (error: any) {
+      console.error("Gagal menghapus grup agenda:", error);
       return false;
     }
   },

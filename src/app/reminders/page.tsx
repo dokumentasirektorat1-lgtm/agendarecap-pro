@@ -42,6 +42,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Swal from "sweetalert2";
 import { downloadICSFile, generateGoogleCalendarUrl } from "@/lib/calendar-service";
 import ConnectivityBanner from "@/components/ConnectivityBanner";
+import { getAppName } from "@/lib/branding";
 
 export default function RemindersPage() {
   const { reminders, occurrences, dbSynced, isOffline, fetchReminders, addReminder, updateReminder, reactivateReminder, toggleReminder, deleteReminder, snoozeOccurrence, completeOccurrence, triggerSync } = useReminderStore();
@@ -406,14 +407,14 @@ export default function RemindersPage() {
                     toast: true,
                     position: 'top-end',
                     icon: 'info',
-                    title: 'Aplikasi AgendaRecap Pro sudah berjalan di perangkat Android Native.',
+                    title: `Aplikasi ${getAppName()} sudah berjalan di perangkat Android Native.`,
                     showConfirmButton: false,
                     timer: 3000
                   });
                 }
               }}
               className="p-3 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl transition-all text-emerald-300 flex items-center gap-2 text-xs font-bold"
-              title="Download APK AgendaRecap Pro"
+              title={`Download APK ${getAppName()}`}
             >
               <Download className="w-4 h-4 text-emerald-400" />
               <span className="hidden sm:inline">Download APK</span>

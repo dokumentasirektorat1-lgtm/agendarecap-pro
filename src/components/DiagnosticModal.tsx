@@ -7,11 +7,13 @@ import { getOfflineQueue, repairOrphanDataAndQueueInIDB, IDBOfflineQueueItem } f
 import { runSyncEngine } from "@/lib/sync-engine";
 import { isNativePlatform, checkNativeAlarmPermissions, getScheduledNativeAlarms } from "@/lib/native-alarm";
 
+export type DiagnosticStatus = 'PENDING' | 'PROCESSING' | 'FAILED_RETRYABLE' | 'FAILED_FATAL' | 'SUCCESS';
+
 export interface DiagnosticItem {
   id: string;
   category: 'SYNC' | 'PUSH' | 'NATIVE_ALARM' | 'NATIVE_SOUND' | 'FCM' | 'WIDGET' | 'AUTH' | 'OFFLINE';
   feature: string;
-  status: 'PENDING' | 'FAILED' | 'SUCCESS';
+  status: DiagnosticStatus;
   message: string;
   detail?: string;
   timestamp: string;
@@ -24,12 +26,14 @@ export interface DiagnosticItem {
 interface DiagnosticModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialFilter?: 'ALL' | 'PENDING' | 'FAILED';
+  initialFilter?: 'ALL' | 'PENDING' | 'PROCESSING' | 'FAILED' | 'RESOLVED';
   onQueueUpdated?: () => void;
 }
 
+const STORAGE_RESOLVED_KEY = 'agendaku_diag_resolved_ids_v2';
+
 export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL', onQueueUpdated }: DiagnosticModalProps) {
-  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'FAILED' | 'RESOLVED'>('ALL');
+  const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'PROCESSING' | 'FAILED' | 'RESOLVED'>('ALL');
   const [diagnostics, setDiagnostics] = useState<DiagnosticItem[]>([]);
   const [resolvedIds, setResolvedIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
@@ -39,28 +43,34 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
 
   useEffect(() => {
     if (initialFilter) {
-      setFilter(initialFilter as 'ALL' | 'PENDING' | 'FAILED' | 'RESOLVED');
+      setFilter(initialFilter);
     }
   }, [initialFilter]);
 
-  // Persist resolved IDs in sessionStorage so they survive refresh during modal session
+  // Persist resolved IDs in localStorage so they survive refresh, modal close, app restart, and sync
   useEffect(() => {
-    const stored = sessionStorage.getItem('agendaku_diag_resolved');
-    if (stored) setResolvedIds(new Set(JSON.parse(stored)));
+    try {
+      const stored = localStorage.getItem(STORAGE_RESOLVED_KEY);
+      if (stored) setResolvedIds(new Set(JSON.parse(stored)));
+    } catch (e) {}
   }, []);
 
   const markAsResolved = (id: string) => {
     setResolvedIds(prev => {
       const next = new Set(prev);
       next.add(id);
-      sessionStorage.setItem('agendaku_diag_resolved', JSON.stringify([...next]));
+      try {
+        localStorage.setItem(STORAGE_RESOLVED_KEY, JSON.stringify([...next]));
+      } catch (e) {}
       return next;
     });
   };
 
   const clearAllResolved = () => {
     setResolvedIds(new Set());
-    sessionStorage.removeItem('agendaku_diag_resolved');
+    try {
+      localStorage.removeItem(STORAGE_RESOLVED_KEY);
+    } catch (e) {}
   };
 
   const loadDiagnosticsData = useCallback(async () => {
@@ -69,11 +79,22 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
       const items: DiagnosticItem[] = [];
       const platformName = isNativePlatform() ? 'Android Native' : 'Web Browser';
 
-      // 1. Load IndexedDB Offline Queue items
+      // 1. Load IndexedDB Offline Queue items with explicit lifecycle states
       const queueItems = await getOfflineQueue();
       for (const q of queueItems) {
-        const isPending = q.status === 'PENDING' || q.status === 'SYNCING';
-        const isFailed = q.status === 'FAILED_RETRYABLE' || q.status === 'FAILED_FATAL';
+        let status: DiagnosticStatus = 'PENDING';
+        let message = q.error_message || 'Menunggu koneksi & giliran eksekusi sinkronisasi';
+
+        if (q.status === 'SYNCING') {
+          status = 'PROCESSING';
+          message = 'Sedang diproses oleh Sync Engine...';
+        } else if (q.status === 'FAILED_RETRYABLE') {
+          status = 'FAILED_RETRYABLE';
+          message = q.error_message || `Gagal sementara (Percobaan ${q.retry_count || 1}), akan diulang otomatis.`;
+        } else if (q.status === 'FAILED_FATAL') {
+          status = 'FAILED_FATAL';
+          message = q.error_message || 'Gagal permanen: Ditolak oleh server atau validasi skema.';
+        }
 
         let category: DiagnosticItem['category'] = 'SYNC';
         if (q.entity_type === 'occurrence' && (q.operation === 'SNOOZE' || q.operation === 'COMPLETE')) {
@@ -89,8 +110,8 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
           id: q.id,
           category,
           feature: featureName,
-          status: isPending ? 'PENDING' : isFailed ? 'FAILED' : 'SUCCESS',
-          message: q.error_message || (isPending ? 'Menunggu jaringan/eksekusi sinkronisasi' : 'Sinkronisasi berhasil'),
+          status,
+          message,
           detail: JSON.stringify({
             queueId: q.id,
             entityType: q.entity_type,
@@ -117,7 +138,7 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
               id: 'sys-perm-notif',
               category: 'NATIVE_ALARM',
               feature: 'Izin Notifikasi Android',
-              status: 'FAILED',
+              status: 'FAILED_FATAL',
               message: 'Izin notifikasi belum diberikan oleh pengguna.',
               detail: `Status izin notifikasi OS: ${perms.notifications}`,
               timestamp: new Date().toLocaleTimeString('id-ID'),
@@ -181,16 +202,22 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
   const activeItems = diagnostics.filter(d => !resolvedIds.has(d.id));
   const resolvedItems = diagnostics.filter(d => resolvedIds.has(d.id));
 
+  const pendingItems = activeItems.filter(d => d.status === 'PENDING');
+  const processingItems = activeItems.filter(d => d.status === 'PROCESSING');
+  const failedItems = activeItems.filter(d => d.status === 'FAILED_RETRYABLE' || d.status === 'FAILED_FATAL');
+
   const filteredDiagnostics = (() => {
-    const pool = filter === 'RESOLVED' ? resolvedItems : activeItems;
-    if (filter === 'PENDING') return pool.filter(d => d.status === 'PENDING');
-    if (filter === 'FAILED') return pool.filter(d => d.status === 'FAILED');
     if (filter === 'RESOLVED') return resolvedItems;
-    return pool; // ALL = active pool
+    if (filter === 'PENDING') return pendingItems;
+    if (filter === 'PROCESSING') return processingItems;
+    if (filter === 'FAILED') return failedItems;
+    return activeItems; // ALL = active unresolved pool
   })();
 
-  const pendingCount = activeItems.filter(d => d.status === 'PENDING').length;
-  const failedCount = activeItems.filter(d => d.status === 'FAILED').length;
+  const pendingCount = pendingItems.length;
+  const processingCount = processingItems.length;
+  const failedCount = failedItems.length;
+  const resolvedCount = resolvedItems.length;
   const successCount = activeItems.filter(d => d.status === 'SUCCESS').length;
 
   const handleManualSync = async () => {
@@ -348,6 +375,19 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
               <Clock className="w-3.5 h-3.5" />
               <span>Pending ({pendingCount})</span>
             </button>
+            {processingCount > 0 && (
+              <button
+                onClick={() => setFilter('PROCESSING')}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                  filter === 'PROCESSING'
+                    ? 'bg-blue-500 text-white shadow-lg shadow-blue-500/20'
+                    : 'bg-blue-500/10 text-blue-300 border border-blue-500/20 hover:bg-blue-500/20'
+                }`}
+              >
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Diproses ({processingCount})</span>
+              </button>
+            )}
             <button
               onClick={() => setFilter('FAILED')}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 ${
@@ -408,6 +448,8 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
               <p className="text-xs text-zinc-400 mt-1">
                 {filter === 'PENDING'
                   ? 'Tidak ada antrean atau tindakan yang sedang pending.'
+                  : filter === 'PROCESSING'
+                  ? 'Tidak ada operasi sinkronisasi yang sedang berjalan.'
                   : filter === 'FAILED'
                   ? 'Tidak ada kegagalan aktif pada sistem saat ini.'
                   : filter === 'RESOLVED'
@@ -416,36 +458,65 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
               </p>
             </div>
           ) : (
-            filteredDiagnostics.map((item) => (
-              <div
-                key={item.id}
-                className={`p-4 rounded-2xl border transition-all ${
-                  item.status === 'FAILED'
-                    ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/40'
-                    : item.status === 'PENDING'
-                    ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40'
-                    : 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40'
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 mb-1">
-                      <span className="font-bold text-white text-sm">{item.feature}</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${
-                        resolvedIds.has(item.id)
-                          ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30'
-                          : item.status === 'FAILED'
-                          ? 'bg-red-500/20 text-red-300 border-red-500/30'
-                          : item.status === 'PENDING'
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                          : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                      }`}>
-                        {resolvedIds.has(item.id) ? 'RESOLVED' : item.status}
-                      </span>
-                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-400 border border-white/10">
-                        {item.category}
-                      </span>
-                    </div>
+            filteredDiagnostics.map((item) => {
+              const isResolved = resolvedIds.has(item.id);
+              const isFailedFatal = item.status === 'FAILED_FATAL';
+              const isFailedRetryable = item.status === 'FAILED_RETRYABLE';
+              const isProcessing = item.status === 'PROCESSING';
+              const isPending = item.status === 'PENDING';
+
+              const cardClass = isResolved
+                ? 'bg-zinc-500/5 border-zinc-500/20'
+                : isFailedFatal
+                ? 'bg-red-500/5 border-red-500/20 hover:border-red-500/40'
+                : isFailedRetryable
+                ? 'bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40'
+                : isProcessing
+                ? 'bg-blue-500/5 border-blue-500/20 hover:border-blue-500/40'
+                : isPending
+                ? 'bg-amber-500/5 border-amber-500/20 hover:border-amber-500/40'
+                : 'bg-emerald-500/5 border-emerald-500/20 hover:border-emerald-500/40';
+
+              const badgeText = isResolved
+                ? 'RESOLVED'
+                : isFailedFatal
+                ? 'GAGAL FATAL'
+                : isFailedRetryable
+                ? 'RETRYING'
+                : isProcessing
+                ? 'DIPROSES'
+                : isPending
+                ? 'PENDING'
+                : 'BERHASIL';
+
+              const badgeClass = isResolved
+                ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/30'
+                : isFailedFatal
+                ? 'bg-red-500/20 text-red-300 border-red-500/30'
+                : isFailedRetryable
+                ? 'bg-orange-500/20 text-orange-300 border-orange-500/30'
+                : isProcessing
+                ? 'bg-blue-500/20 text-blue-300 border-blue-500/30 animate-pulse'
+                : isPending
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
+
+              return (
+                <div
+                  key={item.id}
+                  className={`p-4 rounded-2xl border transition-all ${cardClass}`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                        <span className="font-bold text-white text-sm">{item.feature}</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border ${badgeClass}`}>
+                          {badgeText}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-white/5 text-zinc-400 border border-white/10">
+                          {item.category}
+                        </span>
+                      </div>
 
                     <p className="text-xs text-zinc-300 font-medium mb-1.5">{item.message}</p>
 
@@ -489,8 +560,9 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
                   </div>
                 )}
               </div>
-            ))
-          )}
+            );
+          })
+        )}
         </div>
 
         {/* Footer Actions */}

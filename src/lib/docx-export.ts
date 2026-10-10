@@ -21,6 +21,7 @@ import { AppSettings } from "@/app/actions/settings";
 import { getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "./agenda-time";
 import { buildTimelineBlocks } from "./agenda-timeline";
 import { getAgendaStatusLabel } from "./pdf-export";
+import { getAppName } from "./branding";
 
 export interface DocxExportOptions {
   agendas: Agenda[];
@@ -41,7 +42,7 @@ export async function generateAgendaDocx({
   startDate,
   endDate
 }: DocxExportOptions): Promise<Blob> {
-  const appName = appSettings?.app_name || "AgendaRecap Pro";
+  const appName = getAppName(appSettings);
   const docTitle = title || (mode === "range" ? "REKAP AGENDA RENTANG WAKTU" : "REKAP AGENDA SELURUHNYA");
   const exportTimestamp = format(new Date(), "d MMMM yyyy, HH:mm", { locale: idLocale });
 

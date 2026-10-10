@@ -648,7 +648,7 @@ export function AddAgendaModal({ isOpen, onClose, defaultDate, editAgenda, initi
               )}
 
               <div>
-                <label className="block text-sm font-medium text-zinc-400 mb-1.5 mt-4">Catatan Publik (Opsional)</label>
+                <label className="block text-sm font-medium text-zinc-400 mb-1.5 mt-4">Catatan untuk Dibagikan (Opsional)</label>
                 <textarea
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}

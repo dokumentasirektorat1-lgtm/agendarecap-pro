@@ -4,6 +4,7 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { reminderRepository } from '@/lib/repositories/reminder-repository';
 import { syncRepository } from '@/lib/repositories/sync-repository';
+import { getAppName } from '@/lib/branding';
 
 export interface NativePendingAction {
   actionId: string;
@@ -365,7 +366,7 @@ export async function snoozeNativeLocalAlarm(
       reminderId,
       occurrenceId,
       minutes,
-      title: title || 'Pengingat AgendaRecap Pro',
+      title: title || `Pengingat ${getAppName()}`,
       note: note || '',
       sound: sound || 'default'
     });

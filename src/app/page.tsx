@@ -20,6 +20,7 @@ import { useEffect } from "react";
 import ConnectivityBanner from "@/components/ConnectivityBanner";
 import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
 import { getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "@/lib/agenda-time";
+import { getAppName, getAppLogo } from "@/lib/branding";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -305,7 +306,7 @@ export default function Dashboard() {
                 )}
                 <div>
                   <h1 className="text-lg font-bold text-white leading-tight">
-                    {appSettings?.app_name || "AgendaRecap Pro"}
+                    {getAppName(appSettings)}
                   </h1>
                   <p className="text-[10px] text-zinc-400 font-medium tracking-wide">PRIVATE DASHBOARD</p>
                 </div>
@@ -365,7 +366,7 @@ export default function Dashboard() {
                                 toast: true,
                                 position: 'top-end',
                                 icon: 'info',
-                                title: 'Aplikasi AgendaRecap Pro sudah berjalan di perangkat Android Native.',
+                                title: `Aplikasi ${getAppName(appSettings)} sudah berjalan di perangkat Android Native.`,
                                 showConfirmButton: false,
                                 timer: 3000
                               });

@@ -45,7 +45,7 @@ export default function PublicShareClient({ token }: { token: string }) {
       setError(null);
       try {
         const res = await fetch(`/api/share/${encodeURIComponent(token)}`);
-        if (!res.ok) throw new Error("Gagal memuat agenda publik");
+        if (!res.ok) throw new Error("Gagal memuat agenda yang dibagikan");
         const json = await res.json();
         setAgendas(json.agendas || []);
       } catch (err: any) {
@@ -485,7 +485,7 @@ export default function PublicShareClient({ token }: { token: string }) {
 
             {/* Footer watermark */}
             <footer className="pt-8 text-center text-xs text-zinc-500 border-t border-white/5 space-y-2">
-              <p className="font-medium">Dibuat Resmi melalui Sistem AgendaKu</p>
+              <p className="font-medium">Dibuat Resmi melalui Sistem {getAppName()}</p>
               <p className="text-[11px]">Seluruh informasi disajikan dalam mode Read-Only.</p>
             </footer>
           </div>

@@ -132,6 +132,10 @@ export default function ConsultationPage() {
     const primary = group.agendas[0];
     const newDate = primary?.scheduled_at ? new Date(primary.scheduled_at) : new Date();
 
+    if (primary && !primary.groupId) {
+      await updateAgenda(primary.id, { groupId: group.groupId });
+    }
+
     const success = await addAgenda({
       title: group.title,
       location: primary?.location || '-',

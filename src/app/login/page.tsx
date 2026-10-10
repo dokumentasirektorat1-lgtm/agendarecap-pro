@@ -4,6 +4,7 @@ import { useState } from "react"
 import { motion } from "framer-motion"
 import { login, signup } from "./actions"
 import { CalendarHeart, Mail, Lock } from "lucide-react"
+import { getAppName } from "@/lib/branding"
 
 export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +43,7 @@ export default function LoginPage() {
           <div className="p-3 bg-gradient-to-tr from-purple-500 to-indigo-500 rounded-2xl shadow-lg shadow-purple-500/20 mb-4 inline-flex">
             <CalendarHeart className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white mb-1">AgendaRecap Pro</h1>
+          <h1 className="text-2xl font-bold text-white mb-1">{getAppName()}</h1>
           <p className="text-zinc-400 text-sm text-center">Masuk untuk melihat agenda Anda yang tersinkronisasi dan aman.</p>
         </div>
 
