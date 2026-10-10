@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { DEFAULT_APP_NAME, DEFAULT_APP_LOGO } from "@/lib/branding";
 
 
 export async function GET(request: Request) {
   let logo: string | null = null;
-  let name = "AgendaRecap Pro";
+  let name = DEFAULT_APP_NAME;
   try {
     const url = new URL(request?.url || "https://agendarecap.pro");
     logo = url.searchParams.get("logo");
@@ -11,7 +12,7 @@ export async function GET(request: Request) {
   } catch (e) {}
 
   // Use the provided logo or an existing fallback default icon
-  const iconUrl = logo || "/icons/icon-192.png";
+  const iconUrl = logo || DEFAULT_APP_LOGO;
 
   const manifest = {
     name: name,

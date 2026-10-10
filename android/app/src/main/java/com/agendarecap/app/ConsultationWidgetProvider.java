@@ -61,6 +61,10 @@ public class ConsultationWidgetProvider extends AppWidgetProvider {
         );
         views.setOnClickPendingIntent(R.id.consultation_widget_container, pendingIntent);
 
+        // Dynamic app branding
+        String appName = NativeAlarmPlugin.getSavedAppName(context);
+        views.setTextViewText(R.id.consultation_widget_title, appName.toUpperCase());
+
         try {
             String jsonStr = getConsultationData(context);
             JSONArray array = new JSONArray(jsonStr);

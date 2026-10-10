@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { getAppSettings } from "@/app/actions/settings";
 import { getAppName, getAppLogo, setAppBranding, updateDocumentTitle } from "@/lib/branding";
+import { isNativePlatform, setNativeAppBranding } from "@/lib/native-alarm";
 
 export default function DynamicBranding() {
   useEffect(() => {
@@ -17,6 +18,11 @@ export default function DynamicBranding() {
 
         const effectiveName = getAppName(settings);
         const effectiveLogo = getAppLogo(settings);
+
+        // 2b. Push branding to Android native widgets (no-op on web)
+        if (isNativePlatform()) {
+          setNativeAppBranding(effectiveName, effectiveLogo).catch(() => {});
+        }
 
         // 2. Dynamically update browser title
         updateDocumentTitle(undefined, settings);

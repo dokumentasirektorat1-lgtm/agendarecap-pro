@@ -478,6 +478,38 @@ public class NativeAlarmPlugin extends Plugin {
         }
     }
 
+    // --- App Branding (for dynamic widget labels) ---
+    private static final String BRANDING_PREFS = "agendarecap_branding_prefs";
+    public static final String KEY_APP_NAME = "branding_app_name";
+    public static final String KEY_APP_LOGO = "branding_app_logo";
+    private static final String DEFAULT_APP_NAME = "AgendaRecap Pro";
+
+    public static String getSavedAppName(Context context) {
+        return context.getSharedPreferences(BRANDING_PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_APP_NAME, DEFAULT_APP_NAME);
+    }
+
+    @PluginMethod
+    public void setAppBranding(PluginCall call) {
+        String appName = call.getString("appName", DEFAULT_APP_NAME);
+        String appLogo = call.getString("appLogo", "");
+        Context context = getContext();
+        context.getSharedPreferences(BRANDING_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_APP_NAME, (appName != null && !appName.trim().isEmpty()) ? appName.trim() : DEFAULT_APP_NAME)
+                .putString(KEY_APP_LOGO, appLogo != null ? appLogo : "")
+                .apply();
+
+        // Refresh all widgets to pick up new branding
+        ConsultationWidgetProvider.updateAllWidgets(context);
+        Agenda7DaysWidgetProvider.updateAllWidgets(context);
+        AgendaWidgetProvider.updateAllWidgets(context);
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+    }
+
     @PluginMethod
     public void updateWidgetData(PluginCall call) {
         JSArray items = call.getArray("items");

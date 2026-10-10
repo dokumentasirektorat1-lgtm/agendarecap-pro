@@ -73,6 +73,8 @@ export interface NativeAlarmPluginInterface {
     fileName?: string;
     mimeType?: string;
   }): Promise<{ success: boolean; soundUri?: string; soundName?: string }>;
+
+  setAppBranding(options: { appName: string; appLogo?: string }): Promise<{ success: boolean }>;
 }
 
 const getNativeAlarmPlugin = (): NativeAlarmPluginInterface => {
@@ -552,5 +554,21 @@ export async function saveCustomSoundNative(options: {
   } catch (err) {
     console.error('[NATIVE SOUND SAVE] Failed to save custom sound:', err);
     throw err;
+  }
+}
+
+/**
+ * Sends dynamic app branding (name + logo) to the Android native layer.
+ * Widget headers will use this name instead of the hardcoded default.
+ */
+export async function setNativeAppBranding(appName: string, appLogo?: string): Promise<boolean> {
+  if (!isNativePlatform()) return false;
+  try {
+    const res = await NativeAlarm.setAppBranding({ appName, appLogo: appLogo || '' });
+    console.log(`[NATIVE BRANDING] setAppBranding → name="${appName}" success=${res.success}`);
+    return res.success;
+  } catch (err) {
+    console.warn('[NATIVE BRANDING] setAppBranding notice:', err);
+    return false;
   }
 }
