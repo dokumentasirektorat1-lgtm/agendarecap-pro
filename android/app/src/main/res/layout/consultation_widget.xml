@@ -13,7 +13,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingBottom="8dp">
+        android:paddingBottom="6dp">
 
         <TextView
             android:layout_width="0dp"
@@ -34,7 +34,7 @@
             android:textSize="10sp" />
     </LinearLayout>
 
-    <!-- Count Badge -->
+    <!-- Count Badge + Add Note Button -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -48,16 +48,32 @@
             android:layout_height="wrap_content"
             android:text="0"
             android:textColor="#F97316"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold"
-            android:paddingEnd="6dp" />
+            android:paddingEnd="4dp" />
 
         <TextView
-            android:layout_width="wrap_content"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_weight="1"
             android:text="konsultasi aktif"
             android:textColor="#A1A1AA"
             android:textSize="10sp" />
+
+        <!-- Tambah Catatan Button -->
+        <TextView
+            android:id="@+id/consultation_btn_add_note"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="+ Catatan"
+            android:textColor="#F97316"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:background="#2A1810"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp" />
     </LinearLayout>
 
     <!-- Item 1 -->
@@ -65,28 +81,47 @@
         android:id="@+id/consultation_item1_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:orientation="vertical"
         android:paddingTop="3dp"
         android:paddingBottom="3dp">
 
-        <TextView
-            android:layout_width="8dp"
-            android:layout_height="8dp"
-            android:background="#F97316"
-            android:textSize="0sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="#F97316"
+                android:textSize="0sp" />
+
+            <TextView
+                android:id="@+id/consultation_item1_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="Konsultasi 1"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/consultation_item1_title"
-            android:layout_width="0dp"
+            android:id="@+id/consultation_item1_notes"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:text="Konsultasi 1"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
+            android:layout_marginStart="14dp"
+            android:text=""
+            android:textColor="#A1A1AA"
+            android:textSize="10sp"
             android:maxLines="1"
-            android:ellipsize="end" />
+            android:ellipsize="end"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Item 2 -->
@@ -94,29 +129,97 @@
         android:id="@+id/consultation_item2_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
+        android:orientation="vertical"
         android:paddingTop="3dp"
         android:paddingBottom="3dp"
         android:visibility="gone">
 
-        <TextView
-            android:layout_width="8dp"
-            android:layout_height="8dp"
-            android:background="#F97316"
-            android:textSize="0sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="#F97316"
+                android:textSize="0sp" />
+
+            <TextView
+                android:id="@+id/consultation_item2_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="Konsultasi 2"
+                android:textColor="#E4E4E7"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/consultation_item2_title"
-            android:layout_width="0dp"
+            android:id="@+id/consultation_item2_notes"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:text="Konsultasi 2"
-            android:textColor="#E4E4E7"
-            android:textSize="11sp"
+            android:layout_marginStart="14dp"
+            android:text=""
+            android:textColor="#A1A1AA"
+            android:textSize="10sp"
             android:maxLines="1"
-            android:ellipsize="end" />
+            android:ellipsize="end"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- Item 3 -->
+    <LinearLayout
+        android:id="@+id/consultation_item3_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="#F97316"
+                android:textSize="0sp" />
+
+            <TextView
+                android:id="@+id/consultation_item3_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="Konsultasi 3"
+                android:textColor="#E4E4E7"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/consultation_item3_notes"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:text=""
+            android:textColor="#A1A1AA"
+            android:textSize="10sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:visibility="gone" />
     </LinearLayout>
 
     <!-- Empty state -->

@@ -1,6 +1,7 @@
 package com.agendarecap.app
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.os.Handler
@@ -34,6 +35,74 @@ class MainActivity : BridgeActivity() {
         val webView = bridge.webView
         if (webView != null) {
             configureWebView(webView)
+        }
+
+        // Handle widget tap intent extras on cold start
+        handleWidgetIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        // Handle widget tap intent extras when app is already running
+        handleWidgetIntent(intent)
+    }
+
+    /**
+     * Handles intent extras sent from widget taps.
+     * Navigates the WebView to the target route and optionally triggers an action.
+     * Extras:
+     *   - target_route: "consultation", "reminders", etc.
+     *   - action: "add_note" (optional, triggers action in the page)
+     */
+    private fun handleWidgetIntent(intent: Intent?) {
+        val targetRoute = intent?.getStringExtra("target_route") ?: return
+        val action = intent.getStringExtra("action")
+
+        Log.d(TAG, "Widget intent received: target_route=$targetRoute action=$action")
+
+        // Delay to allow WebView to fully initialize before navigating
+        mainHandler.postDelayed({
+            try {
+                val webView = bridge?.webView ?: return@postDelayed
+                val js = buildWidgetNavigationJs(targetRoute, action)
+                webView.evaluateJavascript(js, null)
+                Log.d(TAG, "Widget navigation JS executed")
+            } catch (e: Exception) {
+                Log.w(TAG, "Widget intent navigation failed: ${e.message}")
+            }
+        }, 600)
+    }
+
+    private fun buildWidgetNavigationJs(route: String, action: String?): String {
+        val routeMap = mapOf(
+            "consultation" to "/consultation",
+            "reminders" to "/reminders",
+            "agenda" to "/",
+            "settings" to "/settings"
+        )
+        val targetPath = routeMap[route] ?: "/$route"
+
+        return if (action == "add_note") {
+            """
+            (function() {
+              if (window.__agendaNavigate) {
+                window.__agendaNavigate('$targetPath', { action: 'add_note' });
+              } else {
+                window.location.href = '$targetPath?action=add_note';
+              }
+            })();
+            """.trimIndent()
+        } else {
+            """
+            (function() {
+              if (window.__agendaNavigate) {
+                window.__agendaNavigate('$targetPath');
+              } else {
+                window.location.href = '$targetPath';
+              }
+            })();
+            """.trimIndent()
         }
     }
 

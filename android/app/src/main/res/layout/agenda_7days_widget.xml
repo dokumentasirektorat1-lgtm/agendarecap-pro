@@ -7,13 +7,13 @@
     android:padding="12dp"
     android:background="#1C1C1E">
 
-    <!-- Header + Date Navigation -->
+    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingBottom="6dp">
+        android:paddingBottom="4dp">
 
         <TextView
             android:layout_width="0dp"
@@ -26,39 +26,13 @@
             android:textStyle="bold"
             android:letterSpacing="0.05" />
 
-        <!-- Prev day button -->
         <TextView
-            android:id="@+id/agenda7_btn_prev"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:gravity="center"
-            android:text="‹"
-            android:textColor="#A1A1AA"
-            android:textSize="16sp"
-            android:textStyle="bold" />
-
-        <!-- Current date display -->
-        <TextView
-            android:id="@+id/agenda7_date_label"
+            android:id="@+id/agenda7_range_label"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Hari ini"
-            android:textColor="#FFFFFF"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp" />
-
-        <!-- Next day button -->
-        <TextView
-            android:id="@+id/agenda7_btn_next"
-            android:layout_width="28dp"
-            android:layout_height="28dp"
-            android:gravity="center"
-            android:text="›"
+            android:text="7 Hari ke Depan"
             android:textColor="#A1A1AA"
-            android:textSize="16sp"
-            android:textStyle="bold" />
+            android:textSize="10sp" />
     </LinearLayout>
 
     <!-- Item 1 -->
@@ -68,12 +42,20 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp">
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp">
+
+        <TextView
+            android:id="@+id/agenda7_item1_date"
+            android:layout_width="36dp"
+            android:layout_height="wrap_content"
+            android:text="Hari ini"
+            android:textColor="#94A3B8"
+            android:textSize="9sp" />
 
         <TextView
             android:id="@+id/agenda7_item1_time"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="wrap_content"
             android:text="08:30"
             android:textColor="#60A5FA"
@@ -99,13 +81,21 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/agenda7_item2_date"
+            android:layout_width="36dp"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="9sp" />
+
+        <TextView
             android:id="@+id/agenda7_item2_time"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="wrap_content"
             android:text="10:00"
             android:textColor="#60A5FA"
@@ -131,13 +121,21 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/agenda7_item3_date"
+            android:layout_width="36dp"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="9sp" />
+
+        <TextView
             android:id="@+id/agenda7_item3_time"
-            android:layout_width="48dp"
+            android:layout_width="44dp"
             android:layout_height="wrap_content"
             android:text="14:00"
             android:textColor="#60A5FA"
@@ -156,12 +154,103 @@
             android:ellipsize="end" />
     </LinearLayout>
 
+    <!-- Item 4 -->
+    <LinearLayout
+        android:id="@+id/agenda7_item4_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/agenda7_item4_date"
+            android:layout_width="36dp"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/agenda7_item4_time"
+            android:layout_width="44dp"
+            android:layout_height="wrap_content"
+            android:text="--:--"
+            android:textColor="#60A5FA"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/agenda7_item4_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Agenda 4"
+            android:textColor="#E4E4E7"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- Item 5 -->
+    <LinearLayout
+        android:id="@+id/agenda7_item5_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/agenda7_item5_date"
+            android:layout_width="36dp"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#94A3B8"
+            android:textSize="9sp" />
+
+        <TextView
+            android:id="@+id/agenda7_item5_time"
+            android:layout_width="44dp"
+            android:layout_height="wrap_content"
+            android:text="--:--"
+            android:textColor="#60A5FA"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/agenda7_item5_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Agenda 5"
+            android:textColor="#E4E4E7"
+            android:textSize="11sp"
+            android:maxLines="1"
+            android:ellipsize="end" />
+    </LinearLayout>
+
+    <!-- More indicator -->
+    <TextView
+        android:id="@+id/agenda7_more_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="+ lebih banyak..."
+        android:textColor="#60A5FA"
+        android:textSize="10sp"
+        android:visibility="gone"
+        android:paddingTop="2dp" />
+
     <!-- Empty state -->
     <TextView
         android:id="@+id/agenda7_empty_text"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Tidak ada agenda"
+        android:text="Tidak ada agenda 7 hari ke depan"
         android:textColor="#71717A"
         android:textSize="11sp"
         android:visibility="gone"
