@@ -95,9 +95,24 @@ async function handleCheckReminders(request: Request) {
       const title = rem.title || 'Pengingat AgendaRecap';
       const body = rem.body || `Waktu pengingat Anda telah tiba!`;
 
-      // Filter target subscribers for the user
-      const targetSubs = activeSubs.filter(s => !rem.user_id || s.user_id === rem.user_id || activeSubs.length === 1);
-      const subsToSend = targetSubs.length > 0 ? targetSubs : activeSubs;
+      // Filter target subscribers strictly for the user
+      const targetSubs = rem.user_id
+        ? activeSubs.filter(s => s.user_id === rem.user_id)
+        : activeSubs.filter(s => !s.user_id);
+      const subsToSend = targetSubs;
+
+      if (subsToSend.length === 0) {
+        console.warn(`[CHECK-REMINDERS] No subscribers found for reminder ${reminderId} (user: ${rem.user_id || 'anonymous'})`);
+        await adminSupabase
+          .from('reminders')
+          .update({
+            is_triggered: false,
+            status: 'failed',
+            updated_at: nowISO
+          })
+          .eq('id', reminderId);
+        continue;
+      }
 
       const payload = JSON.stringify({
         type: 'reminder',
@@ -161,12 +176,12 @@ async function handleCheckReminders(request: Request) {
         }
       }
 
-      // Mark reminder as is_triggered = true and status = 'sent'
+      // Mark reminder status accurately based on actual delivery result
       await adminSupabase
         .from('reminders')
         .update({
-          is_triggered: true,
-          status: 'sent',
+          is_triggered: pushDelivered,
+          status: pushDelivered ? 'sent' : 'failed',
           updated_at: nowISO
         })
         .eq('id', reminderId);

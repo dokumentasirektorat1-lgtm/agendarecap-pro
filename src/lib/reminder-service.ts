@@ -1,6 +1,7 @@
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
 import webpush from 'web-push';
 import { formatLocalFromUTC, getUTCISOFromLocal } from '@/lib/timezone';
+import { recordDeliveryDiagnostic } from '@/lib/delivery-diagnostics';
 
 export interface ProcessRemindersResult {
   success: boolean;
@@ -174,10 +175,39 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
         ? parentReminder.user_id
         : null;
 
+    // Strict Device Targeting: never broadcast across different users
     const targetSubs = reminderUserId
-      ? subscribers.filter(s => !s.user_id || s.user_id === reminderUserId)
-      : subscribers;
-    const subsToSend = targetSubs.length > 0 ? targetSubs : subscribers;
+      ? subscribers.filter(s => s.user_id === reminderUserId)
+      : subscribers.filter(s => !s.user_id);
+    const subsToSend = targetSubs;
+
+    if (subsToSend.length === 0) {
+      addLog(`[NO DEVICE TARGET] No registered push subscribers found for user ${reminderUserId || 'anonymous'}. Occurrence ${occurrenceId} cannot be delivered.`);
+      recordDeliveryDiagnostic({
+        occurrenceId,
+        reminderId,
+        targetUserId: reminderUserId || undefined,
+        targetPlatform: 'None',
+        deliveryType: 'WEB_PUSH',
+        scheduledAt: occ.scheduled_at,
+        result: 'NO_DEVICE_SUBSCRIPTION',
+        status: 'failed',
+        message: 'Tidak ada perangkat aktif terdaftar untuk akun pengguna ini. Notifikasi tidak dapat dikirimkan.',
+        subscriberCount: 0
+      });
+
+      // Update occurrence status to 'failed' rather than falsely marking 'sent'
+      try {
+        await adminSupabase
+          .from('reminder_occurrences')
+          .update({
+            status: 'failed',
+            updated_at: nowISO
+          })
+          .eq('id', occurrenceId);
+      } catch (e) {}
+      continue;
+    }
 
     // Build Web Push & FCM Payload: STRICTLY NO OPEN ACTION! ONLY CLOSE & SNOOZE
     const payloadData = {
@@ -199,6 +229,8 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
     const payload = JSON.stringify(payloadData);
 
     let pushSuccess = false;
+    let lastDeliveryError = '';
+
     for (const sub of subsToSend) {
       addLog(`Sending Push Notification to device endpoint=${sub.endpoint ? sub.endpoint.substring(0, 35) : 'unknown'}...`);
       
@@ -212,6 +244,7 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
           pushSuccess = true;
         } catch (err: any) {
           failedPushCount++;
+          lastDeliveryError = err.message || 'WebPush error';
           addLog(`WebPush failed error=${err.message} statusCode=${err.statusCode}`);
           if (err.statusCode === 404 || err.statusCode === 410) {
             addLog(`Subscribed endpoint expired (404/410) -> Deleting stale subscription endpoint=${sub.endpoint.substring(0, 30)}...`);
@@ -250,20 +283,38 @@ export async function processDueReminders(): Promise<ProcessRemindersResult> {
               successPushCount++;
             }
           } catch (fcmErr: any) {
+            lastDeliveryError = fcmErr.message || 'FCM error';
             addLog(`FCM Push warning: ${fcmErr.message}`);
           }
         }
       }
     }
 
-    // Mark occurrence status as 'sent'
+    // Record delivery attempt result
+    recordDeliveryDiagnostic({
+      occurrenceId,
+      reminderId,
+      targetUserId: reminderUserId || undefined,
+      targetPlatform: 'WebPush / FCM',
+      deliveryType: 'WEB_PUSH',
+      scheduledAt: occ.scheduled_at,
+      result: pushSuccess ? 'DELIVERED_TO_PROVIDER' : 'PROVIDER_ERROR',
+      status: pushSuccess ? 'sent' : 'failed',
+      message: pushSuccess
+        ? `Notifikasi diterima oleh push service untuk ${subsToSend.length} perangkat.`
+        : `Gagal mengirim ke push service: ${lastDeliveryError || 'Unknown error'}`,
+      subscriberCount: subsToSend.length,
+      errorDetail: pushSuccess ? undefined : lastDeliveryError
+    });
+
+    // Mark occurrence status accurately
     const finalStatus = pushSuccess ? 'sent' : 'failed';
     try {
       await adminSupabase
         .from('reminder_occurrences')
         .update({
           status: finalStatus,
-          sent_at: nowISO,
+          sent_at: pushSuccess ? nowISO : null,
           updated_at: nowISO
         })
         .eq('id', occurrenceId);

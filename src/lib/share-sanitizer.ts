@@ -5,7 +5,7 @@ export interface SanitizedPublicAgenda {
   id: string;
   title: string;
   location: string;
-  scheduled_at?: string;
+  scheduled_at?: string | null;
   time_mode?: string;
   status: string;
   is_completed: boolean;

@@ -182,6 +182,41 @@ export default function DiagnosticModal({ isOpen, onClose, initialFilter = 'ALL'
         }
       }
 
+      // 3. Load Server Push Delivery diagnostics (if available)
+      try {
+        const delRes = await fetch('/api/diagnostics/delivery').catch(() => null);
+        if (delRes && delRes.ok) {
+          const delData = await delRes.json();
+          if (delData.success && Array.isArray(delData.diagnostics)) {
+            for (const d of delData.diagnostics) {
+              const timestampStr = new Date(d.attemptedAt).toLocaleTimeString('id-ID', {
+                hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+              });
+              let dStatus: DiagnosticStatus = 'PENDING';
+              if (d.status === 'sent') dStatus = 'SUCCESS';
+              else if (d.status === 'failed') dStatus = 'FAILED_RETRYABLE';
+              else if (d.status === 'processing') dStatus = 'PROCESSING';
+
+              items.push({
+                id: d.id,
+                category: 'PUSH',
+                feature: `DELIVERY (${d.result})`,
+                status: dStatus,
+                message: d.message,
+                detail: JSON.stringify(d, null, 2),
+                timestamp: timestampStr,
+                occurrenceId: d.occurrenceId,
+                retryCount: 0,
+                source: 'Push Delivery Service',
+                platform: platformName
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[DIAGNOSTICS MODAL] Delivery diagnostics fetch notice:', e);
+      }
+
       setDiagnostics(items);
     } catch (e: any) {
       console.error('[DIAGNOSTICS MODAL] Error loading diagnostics:', e);

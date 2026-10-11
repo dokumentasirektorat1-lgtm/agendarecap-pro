@@ -243,8 +243,8 @@ export class SyncRepository {
       for (const { rawItem, item } of sortedQueue) {
         if (item.status === 'FAILED_FATAL') continue;
 
-        // Parent Existence Guard for Occurrence Mutations
-        if (item.entity_type === 'occurrence' && (item.operation === 'CREATE' || item.operation === 'UPDATE' || item.operation === 'SNOOZE' || item.operation === 'COMPLETE' || item.operation === 'DISMISS')) {
+        // Parent Existence Guard for Occurrence CREATE Mutations
+        if (item.entity_type === 'occurrence' && item.operation === 'CREATE') {
           const parentRemId = getOccurrenceParentReminderId(item);
           if (parentRemId) {
             let parentExistsOnServer = syncedReminderIdsInBatch.has(parentRemId);
@@ -258,14 +258,33 @@ export class SyncRepository {
               if (!parentCheckErr && parentRow) {
                 parentExistsOnServer = true;
                 syncedReminderIdsInBatch.add(parentRemId);
+              } else {
+                // Check if parent reminder exists in local IndexedDB to sync parent first
+                const localParent = (await getRemindersFromIDB()).find(r => r.id === parentRemId);
+                if (localParent) {
+                  const reminderPayload = sanitizeReminderForSupabase(localParent);
+                  if (user) reminderPayload.user_id = user.id;
+                  const { error: pErr } = await supabase.from('reminders').upsert(reminderPayload);
+                  if (!pErr) {
+                    parentExistsOnServer = true;
+                    syncedReminderIdsInBatch.add(parentRemId);
+                    console.log(`[SYNC ENGINE] Auto-synced local parent reminder before occurrence CREATE | Reminder ID: ${parentRemId}`);
+                  }
+                }
               }
             }
 
             if (!parentExistsOnServer) {
-              console.warn(`[SYNC ENGINE] Occurrence deferred — parent reminder not yet synced | Reminder ID: ${parentRemId} | Occurrence ID: ${item.entity_id} | Parent: WAITING`);
-              continue; // DEFER: Skip processing for now, leave in queue as PENDING
+              console.warn(`[SYNC ENGINE] Occurrence CREATE deferred — parent reminder not yet synced | Reminder ID: ${parentRemId} | Occurrence ID: ${item.entity_id}`);
+              await updateQueueItemInIDB({
+                ...item,
+                id: rawItem.id,
+                status: 'PENDING',
+                error_message: `Menunggu sinkronisasi pengingat induk (Reminder ID: ${parentRemId})`
+              });
+              continue; // DEFER: Skip processing for now, leave in queue as PENDING with descriptive message
             } else {
-              console.log(`[SYNC ENGINE] Retrying dependent occurrence | Occurrence ID: ${item.entity_id}`);
+              console.log(`[SYNC ENGINE] Dependent occurrence parent verified | Occurrence ID: ${item.entity_id}`);
             }
           }
         }
@@ -527,20 +546,54 @@ export class SyncRepository {
                 console.log(`[CMD LOG][SYNC ENGINE] Occurrence ${item.operation} success: ID="${item.entity_id}"`);
               } else {
                 // Upsert fallback to ensure row is marked completed on Supabase even if row wasn't pre-existing
-                const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload || {});
-                sanitizedPayload.id = item.entity_id;
-                sanitizedPayload.status = statusVal;
-                sanitizedPayload.completed_at = updatePayload.completed_at;
-                sanitizedPayload.updated_at = nowISO;
-                delete (sanitizedPayload as any).user_id;
-                if (!sanitizedPayload.scheduled_at) sanitizedPayload.scheduled_at = nowISO;
-                if (!sanitizedPayload.reminder_id && item.payload?.reminderId) sanitizedPayload.reminder_id = item.payload.reminderId;
+                const parentRemId = getOccurrenceParentReminderId(item);
+                let parentAvailable = false;
+                if (parentRemId) {
+                  if (syncedReminderIdsInBatch.has(parentRemId)) {
+                    parentAvailable = true;
+                  } else {
+                    const { data: parentRow } = await supabase.from('reminders').select('id').eq('id', parentRemId).maybeSingle();
+                    if (parentRow) {
+                      parentAvailable = true;
+                      syncedReminderIdsInBatch.add(parentRemId);
+                    } else {
+                      // Check local IDB for parent reminder
+                      const localParent = (await getRemindersFromIDB()).find(r => r.id === parentRemId);
+                      if (localParent) {
+                        const reminderPayload = sanitizeReminderForSupabase(localParent);
+                        if (user) reminderPayload.user_id = user.id;
+                        const { error: pErr } = await supabase.from('reminders').upsert(reminderPayload);
+                        if (!pErr) {
+                          parentAvailable = true;
+                          syncedReminderIdsInBatch.add(parentRemId);
+                          console.log(`[SYNC ENGINE] Auto-synced local parent reminder before occurrence ${item.operation} | Reminder ID: ${parentRemId}`);
+                        }
+                      }
+                    }
+                  }
+                }
 
-                const { error: upsertErr } = await supabase
-                  .from('reminder_occurrences')
-                  .upsert(sanitizedPayload);
-                queryError = upsertErr;
-                success = !upsertErr;
+                if (!parentAvailable && parentRemId) {
+                  // Parent reminder is missing from both server and local IDB -> Orphan occurrence!
+                  console.warn(`[SYNC ENGINE] Occurrence ${item.entity_id} parent ${parentRemId} missing on server and locally. Resolving orphan mutation.`);
+                  queryError = null;
+                  success = true;
+                } else {
+                  const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload || {});
+                  sanitizedPayload.id = item.entity_id;
+                  sanitizedPayload.status = statusVal;
+                  sanitizedPayload.completed_at = updatePayload.completed_at;
+                  sanitizedPayload.updated_at = nowISO;
+                  delete (sanitizedPayload as any).user_id;
+                  if (!sanitizedPayload.scheduled_at) sanitizedPayload.scheduled_at = nowISO;
+                  if (!sanitizedPayload.reminder_id && parentRemId) sanitizedPayload.reminder_id = parentRemId;
+
+                  const { error: upsertErr } = await supabase
+                    .from('reminder_occurrences')
+                    .upsert(sanitizedPayload);
+                  queryError = upsertErr;
+                  success = !upsertErr;
+                }
               }
             } else if (item.operation === 'UPDATE') {
               const sanitizedPayload = sanitizeOccurrenceForSupabase(item.payload);
