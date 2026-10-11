@@ -53,6 +53,30 @@ export function initSyncEngineListeners() {
     if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
       if (session?.user?.id && navigator.onLine) {
         triggerDebouncedSync('Auth State');
+
+        // Re-register push subscription to bind user_id correctly.
+        // This is critical: subscriptions registered before login have user_id=null
+        // and will not receive reminders. Re-registering after login fixes this.
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && 'serviceWorker' in navigator && 'PushManager' in window) {
+          try {
+            const registration = await navigator.serviceWorker.ready;
+            const existingSub = await registration.pushManager.getSubscription();
+            if (existingSub) {
+              const subJSON = existingSub.toJSON();
+              await fetch('/api/push/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  subscription: subJSON,
+                  deviceInfo: { userAgent: navigator.userAgent, platform: navigator.platform }
+                })
+              });
+              console.log(`[PUSH] Re-registered push subscription for user ${session.user.id}`);
+            }
+          } catch (pushErr) {
+            console.warn('[PUSH] Re-registration on auth notice:', pushErr);
+          }
+        }
       }
     }
   });
