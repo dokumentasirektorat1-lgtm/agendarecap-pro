@@ -21,6 +21,7 @@ import ConnectivityBanner from "@/components/ConnectivityBanner";
 import { isNativePlatform, navigateNative } from "@/lib/native-alarm";
 import { getAgendaTimeDisplay, getAgendaTimeMode, isAgendaUnscheduled } from "@/lib/agenda-time";
 import { getAppName, getAppLogo } from "@/lib/branding";
+import { computeAgendaDensity } from "@/lib/agenda-density";
 
 export default function Dashboard() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -247,41 +248,7 @@ export default function Dashboard() {
   };
 
   // Calculate agenda density per date using unique canonical agenda IDs (taking ALL_DAY into account - Section 9 & 21)
-  const uniqueAgendas = Array.from(
-    new Map(agendas.map(a => [a.id, a])).values()
-  );
-
-  const agendaDensityByDate = uniqueAgendas
-    .filter(a => getAgendaTimeMode(a) !== 'unscheduled' && a.scheduled_at && a.status !== 'cancelled')
-    .reduce((acc, a) => {
-      const key = format(new Date(a.scheduled_at!), 'yyyy-MM-dd');
-      if (!acc[key]) {
-        acc[key] = { count: 0, hasAllDay: false };
-      }
-      acc[key].count += 1;
-      if (getAgendaTimeMode(a) === 'all_day') {
-        acc[key].hasAllDay = true;
-      }
-      return acc;
-    }, {} as Record<string, { count: number; hasAllDay: boolean }>);
-
-  const dates1 = Object.entries(agendaDensityByDate)
-    .filter(([_, info]) => !info.hasAllDay && info.count === 1)
-    .map(([d]) => new Date(d + 'T00:00:00'));
-
-  const dates2 = Object.entries(agendaDensityByDate)
-    .filter(([_, info]) => !info.hasAllDay && (info.count === 2 || info.count === 3))
-    .map(([d]) => new Date(d + 'T00:00:00'));
-
-  const dates4 = Object.entries(agendaDensityByDate)
-    .filter(([_, info]) => !info.hasAllDay && info.count === 4)
-    .map(([d]) => new Date(d + 'T00:00:00'));
-
-  const datesFull = Object.entries(agendaDensityByDate)
-    .filter(([_, info]) => info.hasAllDay || info.count >= 5)
-    .map(([d]) => new Date(d + 'T00:00:00'));
-
-  const allAgendaDates = Object.keys(agendaDensityByDate).map(d => new Date(d + 'T00:00:00'));
+  const { agendaDensityByDate, dates1, dates2, dates4, datesFull, allAgendaDates } = computeAgendaDensity(agendas);
 
   return (
     <main className="min-h-screen relative overflow-hidden bg-background">

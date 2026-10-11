@@ -11,88 +11,27 @@ import {
   updateNativeConsultationWidgetData, 
   isNativePlatform 
 } from "@/lib/native-alarm";
-import { isSameDay, format } from "date-fns";
+import { 
+  buildUpcomingWidgetPayload, 
+  buildAgenda7DaysWidgetPayload, 
+  buildConsultationWidgetPayload 
+} from "@/lib/widget-payloads";
 
-function syncWidgetData(agendas: Agenda[]) {
+export function syncWidgetData(agendas: Agenda[]) {
   if (!isNativePlatform()) return;
   try {
     const today = new Date();
 
     // 1. AgendaWidgetProvider (Primary daily/upcoming widget)
-    let todayAgendas = agendas.filter(a => {
-      if (a.status === 'cancelled') return false;
-      if (getAgendaTimeMode(a) === 'unscheduled') return false;
-      if (!a.scheduled_at) return false;
-      return isSameDay(new Date(a.scheduled_at), today);
-    });
-
-    // Fallback: If no agenda today, show the closest upcoming agendas within 7 days
-    if (todayAgendas.length === 0) {
-      const nowTime = today.getTime();
-      const nextWeekTime = nowTime + 7 * 24 * 60 * 60 * 1000;
-      todayAgendas = agendas.filter(a => {
-        if (a.status === 'cancelled') return false;
-        if (getAgendaTimeMode(a) === 'unscheduled') return false;
-        if (!a.scheduled_at) return false;
-        const t = new Date(a.scheduled_at).getTime();
-        return t >= nowTime && t <= nextWeekTime;
-      }).slice(0, 3);
-    }
-
-    const widgetItems = todayAgendas.slice(0, 3).map(a => ({
-      title: a.title,
-      time: getAgendaTimeDisplay(a)
-    }));
-
+    const widgetItems = buildUpcomingWidgetPayload(agendas, today);
     updateNativeWidgetData(widgetItems).catch(() => {});
 
     // 2. Agenda7DaysWidgetProvider (Interactive 7-day widget with date navigation)
-    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-    const endOf7Days = startOfToday + 8 * 24 * 60 * 60 * 1000;
-
-    const sevenDaysAgendas = agendas
-      .filter(a => {
-        if (a.status === 'cancelled') return false;
-        if (getAgendaTimeMode(a) === 'unscheduled') return false;
-        if (!a.scheduled_at) return false;
-        const t = new Date(a.scheduled_at).getTime();
-        return t >= startOfToday && t <= endOf7Days;
-      })
-      .sort((a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime())
-      .map(a => ({
-        title: a.title,
-        time: getAgendaTimeDisplay(a),
-        date: format(new Date(a.scheduled_at), 'yyyy-MM-dd')
-      }));
-
+    const sevenDaysAgendas = buildAgenda7DaysWidgetPayload(agendas, today);
     updateNativeAgenda7DaysWidgetData(sevenDaysAgendas).catch(() => {});
 
     // 3. ConsultationWidgetProvider (Active consultation widget grouped by groupId || id)
-    const consultationMap = new Map<string, { title: string; count: number; notes: string }>();
-    for (const a of agendas) {
-      if ((a.status === 'pending_consultation' || a.status === 'rescheduled' || a.status === 'unscheduled') && !a.is_completed) {
-        const groupKey = a.groupId || a.id;
-        const existing = consultationMap.get(groupKey);
-        if (!existing) {
-          consultationMap.set(groupKey, {
-            title: a.title,
-            count: 1,
-            notes: a.privateNotes || a.notes || ''
-          });
-        } else {
-          existing.count += 1;
-        }
-      }
-    }
-
-    const consultationItems = Array.from(consultationMap.values())
-      .slice(0, 10)
-      .map(g => ({
-        title: g.count > 1 ? `${g.title} (${g.count} Sesi)` : g.title,
-        notes: g.notes,
-        count: g.count
-      }));
-
+    const consultationItems = buildConsultationWidgetPayload(agendas);
     updateNativeConsultationWidgetData(consultationItems).catch(() => {});
   } catch (e) {
     console.warn('[WIDGET SYNC] Error syncing widget data:', e);
@@ -138,19 +77,20 @@ type StoreState = {
   subscribeRealtime: () => () => void;
 };
 
-export const useStore = create<StoreState>((set, get) => {
-  // B-1: Deduplication helper — canonical ID wins, last-write wins on duplicates
-  function deduplicateAgendas(agendas: Agenda[]): Agenda[] {
-    const map = new Map<string, Agenda>();
-    for (const a of agendas) {
-      if (!a?.id) continue;
-      const existing = map.get(a.id);
-      if (!existing || (a.updated_at && a.updated_at > (existing.updated_at || ''))) {
-        map.set(a.id, a);
-      }
+// B-1: Deduplication helper — canonical ID wins, last-write wins on duplicates
+export function deduplicateAgendas(agendas: Agenda[]): Agenda[] {
+  const map = new Map<string, Agenda>();
+  for (const a of agendas) {
+    if (!a?.id) continue;
+    const existing = map.get(a.id);
+    if (!existing || (a.updated_at && a.updated_at > (existing.updated_at || ''))) {
+      map.set(a.id, a);
     }
-    return Array.from(map.values());
   }
+  return Array.from(map.values());
+}
+
+export const useStore = create<StoreState>((set, get) => {
 
   return {
   agendas: [],

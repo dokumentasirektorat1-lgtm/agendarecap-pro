@@ -49,7 +49,7 @@ export function formatAgendasToWhatsApp(
   const isWatermarkEnabled = settings?.is_watermark_enabled ?? true;
   const watermarkText = settings?.watermark_text 
     ? toCapitalizeAll(settings.watermark_text) 
-    : 'Dibuat Oleh Agenda Recap Pro';
+    : toCapitalizeAll(`Dibuat oleh ${DEFAULT_APP_NAME}`);
 
   // Capitalize format tanggal
   const formattedDateTitle = toCapitalizeAll(dateTitle);

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient as createAdminSupabase } from '@supabase/supabase-js';
+import { sanitizeShareAgendas } from '@/lib/share-sanitizer';
 
 export const revalidate = 0;
 export function generateStaticParams() { return [{ token: 'placeholder' }]; }
@@ -17,6 +18,17 @@ export async function GET(
 ) {
   try {
     const { token } = await params;
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    let search: string | undefined;
+
+    try {
+      const url = new URL(request.url);
+      startDate = url.searchParams.get('startDate') || undefined;
+      endDate = url.searchParams.get('endDate') || undefined;
+      search = url.searchParams.get('search') || undefined;
+    } catch (_) {}
+
     const client = getAdminClient();
 
     let query = client.from('agendas').select('*').eq('isShareable', true);
@@ -34,22 +46,12 @@ export async function GET(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Sanitize data: Strictly strip privateNotes and unshared notes
-    const publicAgendas = (data || []).map(a => ({
-      id: a.id,
-      title: a.title,
-      location: a.location || '',
-      scheduled_at: a.scheduled_at,
-      time_mode: a.time_mode || undefined,
-      status: a.status || 'confirmed',
-      is_completed: Boolean(a.is_completed),
-      isOnline: Boolean(a.isOnline),
-      onlineLink: a.onlineLink || '',
-      meetingId: a.meetingId || '',
-      meetingPasscode: a.meetingPasscode || '',
-      notes: a.include_notes_in_share ? (a.notes || '') : undefined,
-      isShareable: true
-    }));
+    // Sanitize data: Strictly strip privateNotes and unshared notes via canonical sanitizer
+    const publicAgendas = sanitizeShareAgendas(data || [], {
+      startDate,
+      endDate,
+      search
+    });
 
     return NextResponse.json({ agendas: publicAgendas, token });
   } catch (err: any) {

@@ -1,6 +1,7 @@
 
 
 import { createClient } from "@/lib/supabase/client";
+import { DEFAULT_APP_NAME } from "@/lib/branding";
 
 export interface AppSettings {
   id?: string;
@@ -91,10 +92,10 @@ export async function saveAppSettings(settings: Partial<AppSettings>) {
     } else {
       const defaultSettings = {
         user_id: user.id,
-        app_name: 'AgendaRecap',
+        app_name: DEFAULT_APP_NAME,
         share_order: ['title', 'time', 'location'],
         is_watermark_enabled: true,
-        watermark_text: 'Dibuat oleh AgendaRecap Pro',
+        watermark_text: `Dibuat oleh ${DEFAULT_APP_NAME}`,
       };
 
       const { error } = await supabase

@@ -61,7 +61,7 @@ export default function SettingsPage() {
             Pengaturan Aplikasi
           </h1>
           <p className="text-zinc-400 mt-2 text-sm">
-            Sesuaikan tampilan dan format berbagi (WhatsApp) untuk AgendaRecap Anda.
+            Sesuaikan tampilan dan format berbagi (WhatsApp) untuk agenda Anda.
           </p>
         </div>
         <SettingsForm initialSettings={initialSettings || undefined} />
