@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical"
+    android:paddingTop="4dp"
+    android:paddingBottom="4dp"
+    android:paddingStart="2dp"
+    android:paddingEnd="2dp">
+
+    <!-- Date label (e.g. Hari ini / 30/10) -->
+    <TextView
+        android:id="@+id/agenda7_item_date"
+        android:layout_width="40dp"
+        android:layout_height="wrap_content"
+        android:text="30/10"
+        android:textColor="#94A3B8"
+        android:textSize="11sp"
+        android:lineSpacingMultiplier="1.1" />
+
+    <!-- Time -->
+    <TextView
+        android:id="@+id/agenda7_item_time"
+        android:layout_width="48dp"
+        android:layout_height="wrap_content"
+        android:text="08:00"
+        android:textColor="#60A5FA"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+    <!-- Title -->
+    <TextView
+        android:id="@+id/agenda7_item_title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="Seminar Artikel"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:maxLines="2"
+        android:ellipsize="end"
+        android:lineSpacingMultiplier="1.1" />
+
+</LinearLayout>

@@ -24,6 +24,16 @@ export function createClient(): SupabaseClient {
       detectSessionInUrl: true,
       lock: dummyLock,
     },
+    global: {
+      fetch: (url, options = {}) => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        return fetch(url, {
+          ...options,
+          signal: options.signal || controller.signal,
+        }).finally(() => clearTimeout(timeoutId));
+      },
+    },
   });
 
   return cachedSupabaseClient;

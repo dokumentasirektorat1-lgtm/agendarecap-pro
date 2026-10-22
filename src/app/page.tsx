@@ -44,6 +44,10 @@ export default function Dashboard() {
   useEffect(() => {
     getAppSettings().then(setAppSettings);
     fetchAgendas();
+    const unsubscribe = useStore.getState().subscribeRealtime();
+    return () => {
+      unsubscribe();
+    };
   }, [fetchAgendas]);
 
   // Native-aware navigation helper

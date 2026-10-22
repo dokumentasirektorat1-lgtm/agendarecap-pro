@@ -105,6 +105,12 @@
                 android:resource="@xml/agenda_7days_widget_info" />
         </receiver>
 
+        <!-- RemoteViews Service for scrollable Agenda 7 Days Widget -->
+        <service
+            android:name=".Agenda7DaysWidgetService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
         <!-- Firebase Cloud Messaging Service -->
         <service
             android:name=".FCMService"

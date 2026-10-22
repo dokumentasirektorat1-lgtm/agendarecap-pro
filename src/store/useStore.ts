@@ -111,7 +111,11 @@ export const useStore = create<StoreState>((set, get) => {
 
       // 2. Background Sync if online
       if (typeof navigator !== 'undefined' && navigator.onLine) {
-        await syncRepository.runSync();
+        try {
+          await syncRepository.runSync();
+        } catch (syncErr) {
+          console.warn('[STORE] syncRepository.runSync notice:', syncErr);
+        }
         const updatedLocal = await agendaRepository.getLocal();
         const updatedDeduped = deduplicateAgendas(updatedLocal as Agenda[]);
         set({ agendas: updatedDeduped });

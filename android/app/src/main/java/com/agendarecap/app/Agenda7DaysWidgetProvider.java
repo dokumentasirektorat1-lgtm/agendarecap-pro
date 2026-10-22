@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
 import android.view.View;
 import android.widget.RemoteViews;
 import org.json.JSONArray;
@@ -17,8 +18,8 @@ import java.util.Locale;
 
 /**
  * Agenda7DaysWidgetProvider
- * Displays a cumulative list of agendas from today through the next 7 days
- * on the Android home screen. Shows up to 5 items sorted chronologically.
+ * Displays a scrollable list of agendas from today through the next 7 days
+ * using a ListView backed by Agenda7DaysWidgetService (RemoteViewsService).
  * Data stored as flat array in SharedPreferences, populated from NativeAlarmPlugin.
  */
 public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
@@ -26,7 +27,7 @@ public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
     private static final String PREFS_NAME = "agendarecap_agenda7_widget_prefs";
     private static final String KEY_ALL_DATA = "agenda7_all_items_json";
 
-    // Keep these action strings for backwards-compat even though buttons are removed
+    // Keep for backwards-compat
     public static final String ACTION_PREV_DAY = "com.agendarecap.app.AGENDA7_PREV_DAY";
     public static final String ACTION_NEXT_DAY = "com.agendarecap.app.AGENDA7_NEXT_DAY";
 
@@ -63,7 +64,7 @@ public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
         String appName = NativeAlarmPlugin.getSavedAppName(context);
         views.setTextViewText(R.id.agenda7_widget_label, appName.toUpperCase());
 
-        // Tap on widget → open main app
+        // Tap on widget header → open main app
         Intent mainIntent = new Intent(context, MainActivity.class);
         PendingIntent mainPendingIntent = PendingIntent.getActivity(
                 context, 0, mainIntent,
@@ -71,99 +72,54 @@ public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
         );
         views.setOnClickPendingIntent(R.id.agenda7_widget_container, mainPendingIntent);
 
-        // Compute today and +7 day window
-        Calendar today = Calendar.getInstance();
-        Calendar endDay = Calendar.getInstance();
-        endDay.add(Calendar.DAY_OF_YEAR, 7);
-
-        SimpleDateFormat keyFmt = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
-        String todayKey = keyFmt.format(today.getTime());
-        String endKey = keyFmt.format(endDay.getTime());
-
-        // Collect all items within the next 7 days, sorted by date+time
-        int[] containerIds = {
-            R.id.agenda7_item1_container, R.id.agenda7_item2_container,
-            R.id.agenda7_item3_container, R.id.agenda7_item4_container,
-            R.id.agenda7_item5_container
-        };
-        int[] dateIds = {
-            R.id.agenda7_item1_date, R.id.agenda7_item2_date,
-            R.id.agenda7_item3_date, R.id.agenda7_item4_date,
-            R.id.agenda7_item5_date
-        };
-        int[] timeIds = {
-            R.id.agenda7_item1_time, R.id.agenda7_item2_time,
-            R.id.agenda7_item3_time, R.id.agenda7_item4_time,
-            R.id.agenda7_item5_time
-        };
-        int[] titleIds = {
-            R.id.agenda7_item1_title, R.id.agenda7_item2_title,
-            R.id.agenda7_item3_title, R.id.agenda7_item4_title,
-            R.id.agenda7_item5_title
-        };
-
-        // Hide all slots initially
-        for (int cid : containerIds) {
-            views.setViewVisibility(cid, View.GONE);
-        }
-        views.setViewVisibility(R.id.agenda7_empty_text, View.GONE);
-        views.setViewVisibility(R.id.agenda7_more_text, View.GONE);
-
+        // ---- Check if there are any items to show ----
+        boolean hasItems = false;
         try {
             String jsonStr = getAgendaData(context);
             JSONArray allItems = new JSONArray(jsonStr);
 
-            // Filter to today..+7 days window
-            JSONArray filtered = new JSONArray();
+            Calendar today = Calendar.getInstance();
+            Calendar endDay = Calendar.getInstance();
+            endDay.add(Calendar.DAY_OF_YEAR, 8);
+
+            SimpleDateFormat keyFmt = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
+            String todayKey = keyFmt.format(today.getTime());
+            String endKey = keyFmt.format(endDay.getTime());
+
             for (int i = 0; i < allItems.length(); i++) {
                 JSONObject item = allItems.getJSONObject(i);
                 String itemDate = item.optString("date", "");
-                // Include if date is >= today and <= endDay
                 if (itemDate.compareTo(todayKey) >= 0 && itemDate.compareTo(endKey) <= 0) {
-                    filtered.put(item);
+                    hasItems = true;
+                    break;
                 }
             }
+        } catch (Exception ignored) {}
 
-            int total = filtered.length();
+        if (hasItems) {
+            // ---- Set up RemoteAdapter for scrollable ListView ----
+            // Use unique URI per widget ID so each widget gets its own data set
+            Intent serviceIntent = new Intent(context, Agenda7DaysWidgetService.class);
+            serviceIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+            serviceIntent.setData(Uri.fromParts("content", String.valueOf(appWidgetId), null));
 
-            if (total == 0) {
-                views.setViewVisibility(R.id.agenda7_empty_text, View.VISIBLE);
-            } else {
-                int displayCount = Math.min(total, 5);
-                SimpleDateFormat labelFmt = new SimpleDateFormat("d/M", Locale.getDefault());
+            views.setRemoteAdapter(R.id.agenda7_list_view, serviceIntent);
 
-                for (int i = 0; i < displayCount; i++) {
-                    JSONObject item = filtered.getJSONObject(i);
-                    String itemDate = item.optString("date", "");
-                    String time = item.optString("time", "--:--");
-                    String title = item.optString("title", "Agenda");
+            // Pending intent template for item taps → open main app
+            Intent itemClickIntent = new Intent(context, MainActivity.class);
+            PendingIntent itemPendingIntent = PendingIntent.getActivity(
+                    context, 1, itemClickIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            views.setPendingIntentTemplate(R.id.agenda7_list_view, itemPendingIntent);
 
-                    // Human-readable date label
-                    String dateLabel;
-                    if (todayKey.equals(itemDate)) {
-                        dateLabel = "Hari\nini";
-                    } else {
-                        // Format as "d/M"
-                        try {
-                            java.util.Date d = keyFmt.parse(itemDate);
-                            dateLabel = d != null ? labelFmt.format(d) : itemDate.substring(5);
-                        } catch (Exception ex) {
-                            dateLabel = itemDate.length() >= 10 ? itemDate.substring(5) : itemDate;
-                        }
-                    }
+            views.setViewVisibility(R.id.agenda7_list_view, View.VISIBLE);
+            views.setViewVisibility(R.id.agenda7_empty_text, View.GONE);
 
-                    views.setTextViewText(dateIds[i], dateLabel);
-                    views.setTextViewText(timeIds[i], time);
-                    views.setTextViewText(titleIds[i], title);
-                    views.setViewVisibility(containerIds[i], View.VISIBLE);
-                }
-
-                if (total > 5) {
-                    views.setViewVisibility(R.id.agenda7_more_text, View.VISIBLE);
-                    views.setTextViewText(R.id.agenda7_more_text, "+" + (total - 5) + " agenda lainnya");
-                }
-            }
-        } catch (Exception e) {
+            // Notify that data changed so the factory refreshes
+            appWidgetManager.notifyAppWidgetViewDataChanged(appWidgetId, R.id.agenda7_list_view);
+        } else {
+            views.setViewVisibility(R.id.agenda7_list_view, View.GONE);
             views.setViewVisibility(R.id.agenda7_empty_text, View.VISIBLE);
         }
 

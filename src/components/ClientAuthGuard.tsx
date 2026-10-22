@@ -167,13 +167,30 @@ function getLocalCachedSession(): Session | null {
         if (newSession) {
           console.log('[AUTH GUARD] INITIAL_SESSION resolved -> AUTHENTICATED');
           setAuthState('AUTHENTICATED');
+          import("@/store/useStore").then(({ useStore }) => {
+            useStore.getState().fetchAgendas();
+          }).catch(() => {});
         } else {
           const cached = getLocalCachedSession();
           if (cached) {
-            console.log('[AUTH GUARD] INITIAL_SESSION null, but cached session present -> AUTHENTICATED');
+            console.log('[AUTH GUARD] INITIAL_SESSION null, but cached session present -> restoring session');
+            if (cached.access_token && cached.refresh_token && cached.access_token !== 'offline-token') {
+              supabase.auth.setSession({
+                access_token: cached.access_token,
+                refresh_token: cached.refresh_token
+              }).then(res => {
+                if (res.data?.session) {
+                  setSession(res.data.session);
+                  setUser(res.data.session.user);
+                }
+              }).catch(e => console.warn('[AUTH GUARD] INITIAL_SESSION setSession fallback warning:', e));
+            }
             setSession(cached);
             setUser(cached.user);
             setAuthState('AUTHENTICATED');
+            import("@/store/useStore").then(({ useStore }) => {
+              useStore.getState().fetchAgendas();
+            }).catch(() => {});
           } else {
             console.log('[AUTH GUARD] INITIAL_SESSION resolved -> UNAUTHENTICATED');
             setAuthState('UNAUTHENTICATED');
@@ -182,6 +199,9 @@ function getLocalCachedSession(): Session | null {
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         console.log(`[AUTH GUARD] Event ${event} -> AUTHENTICATED`);
         setAuthState('AUTHENTICATED');
+        import("@/store/useStore").then(({ useStore }) => {
+          useStore.getState().fetchAgendas();
+        }).catch(() => {});
       } else if (event === 'SIGNED_OUT') {
         console.log('[AUTH GUARD] SIGNED_OUT -> UNAUTHENTICATED');
         setAuthState('UNAUTHENTICATED');
@@ -204,13 +224,39 @@ function getLocalCachedSession(): Session | null {
           setSession(initialSession);
           setUser(initialSession.user);
           setAuthState('AUTHENTICATED');
+          import("@/store/useStore").then(({ useStore }) => {
+            useStore.getState().fetchAgendas();
+          }).catch(() => {});
         } else {
           const cached = getLocalCachedSession();
           if (cached) {
-            console.log('[AUTH GUARD] getSession null, but found cached local session -> AUTHENTICATED');
+            console.log('[AUTH GUARD] getSession null, but found cached local session -> restoring session');
+            if (cached.access_token && cached.refresh_token && cached.access_token !== 'offline-token') {
+              try {
+                const { data: setRes } = await supabase.auth.setSession({
+                  access_token: cached.access_token,
+                  refresh_token: cached.refresh_token
+                });
+                if (setRes?.session) {
+                  setSession(setRes.session);
+                  setUser(setRes.session.user);
+                  setAuthState('AUTHENTICATED');
+                  await refreshQueueStats();
+                  import("@/store/useStore").then(({ useStore }) => {
+                    useStore.getState().fetchAgendas();
+                  }).catch(() => {});
+                  return;
+                }
+              } catch (e) {
+                console.warn('[AUTH GUARD] hydrateSession setSession fallback warning:', e);
+              }
+            }
             setSession(cached);
             setUser(cached.user);
             setAuthState('AUTHENTICATED');
+            import("@/store/useStore").then(({ useStore }) => {
+              useStore.getState().fetchAgendas();
+            }).catch(() => {});
           } else {
             console.log('[AUTH GUARD] getSession null & no cached session -> UNAUTHENTICATED');
             setAuthState(prev => (prev === 'INITIALIZING' ? 'UNAUTHENTICATED' : prev));

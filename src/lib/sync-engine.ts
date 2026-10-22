@@ -57,13 +57,16 @@ export function initSyncEngineListeners() {
         // Re-register push subscription to bind user_id correctly.
         // This is critical: subscriptions registered before login have user_id=null
         // and will not receive reminders. Re-registering after login fixes this.
-        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && 'serviceWorker' in navigator && 'PushManager' in window) {
+        // Only re-register push on web — Capacitor native uses FCM, not Web Push API
+        if (!Capacitor.isNativePlatform() && (event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && 'serviceWorker' in navigator && 'PushManager' in window) {
           try {
             const registration = await navigator.serviceWorker.ready;
             const existingSub = await registration.pushManager.getSubscription();
             if (existingSub) {
               const subJSON = existingSub.toJSON();
-              await fetch('/api/push/subscribe', {
+              // Use absolute URL to avoid "Failed to fetch" in ambiguous contexts
+              const subscribeUrl = `${window.location.origin}/api/push/subscribe`;
+              await fetch(subscribeUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

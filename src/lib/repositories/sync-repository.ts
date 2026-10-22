@@ -3,7 +3,8 @@ import {
   removeFromOfflineQueue, 
   updateQueueItemInIDB,
   getAgendasFromIDB, 
-  saveAgendasToIDB, 
+  saveAgendasToIDB,
+  deleteAgendaFromIDB,
   getRemindersFromIDB, 
   saveRemindersToIDB,
   deleteReminderFromIDB, 
@@ -208,7 +209,40 @@ export class SyncRepository {
     try {
       // 0. Check Auth & Repair Orphan Local Data / Queue
       const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user || null;
+      let user = session?.user || null;
+
+      // Fallback: check localStorage for cached Supabase auth token
+      if (!user && typeof window !== 'undefined') {
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && (key.startsWith('sb-') && key.endsWith('-auth-token'))) {
+              const item = localStorage.getItem(key);
+              if (item) {
+                const parsed = JSON.parse(item);
+                const cachedUser = parsed?.user || parsed?.currentSession?.user;
+                if (cachedUser && cachedUser.id) {
+                  user = cachedUser;
+                  if (parsed.access_token && parsed.refresh_token && parsed.access_token !== 'offline-token') {
+                    try {
+                      const { data: setRes } = await supabase.auth.setSession({
+                        access_token: parsed.access_token,
+                        refresh_token: parsed.refresh_token
+                      });
+                      if (setRes?.user) {
+                        user = setRes.user;
+                      }
+                    } catch (e) {
+                      console.warn('[SYNC ENGINE] setSession fallback warning:', e);
+                    }
+                  }
+                  break;
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
 
       if (user) {
         console.log(`[SYNC ENGINE] Authenticated user active: ${user.id}`);
@@ -708,15 +742,17 @@ export class SyncRepository {
             console.warn(`Queue Payload:`, JSON.stringify(item.payload, null, 2));
             console.warn(`[SYNC ENGINE] ===== END SYNC FAILURE =====`);
 
-            // Purge unresolvable / legacy failed queue items to clear offline_queue
-            if (nextRetry >= 5 || errCode === '23505' || errCode === 'RLS_OR_ZERO_ROWS') {
-              console.warn(`[SYNC ENGINE] Purging unresolvable queue item ${rawItem.id} from IndexedDB.`);
+            // Do NOT purge items on network error, timeout, or general retry count!
+            // Only purge if duplicate (23505) or idempotent verified.
+            const isTimeoutOrNetwork = errCode === 'PGRST000' || errCode === '504' || errMessage.includes('timeout') || errMessage.includes('fetch');
+            if (!isTimeoutOrNetwork && errCode === '23505') {
+              console.warn(`[SYNC ENGINE] Purging resolved/duplicate queue item ${rawItem.id} from IndexedDB.`);
               await removeFromOfflineQueue(rawItem.id);
             } else {
               await updateQueueItemInIDB({
                 ...item,
                 id: rawItem.id,
-                retry_count: nextRetry,
+                retry_count: Math.min(nextRetry, 10),
                 status: 'FAILED_RETRYABLE',
                 error_message: `${errCode}: ${errMessage}`
               });
@@ -733,27 +769,18 @@ export class SyncRepository {
           console.warn(`Attempt: ${nextRetry}`);
           console.warn(`Error Name: ${err?.name || 'Error'}`);
           console.warn(`Error Message: ${err?.message || String(err)}`);
-          console.warn(`Error Stack: ${err?.stack || 'None'}`);
-          if (err?.code) console.warn(`Supabase Error Code: ${err.code}`);
-          if (err?.details) console.warn(`Supabase Error Details: ${err.details}`);
-          if (err?.hint) console.warn(`Supabase Error Hint: ${err.hint}`);
-          console.warn(`Queue Payload:`, JSON.stringify(item?.payload, null, 2));
           console.warn(`[SYNC ENGINE] ===== END SYNC EXCEPTION FAILURE =====`);
 
           errors.push(err.message || String(err));
           
-          if (nextRetry >= 5) {
-            console.warn(`[SYNC ENGINE] Purging exception-failed queue item ${rawItem.id} from IndexedDB.`);
-            await removeFromOfflineQueue(rawItem.id);
-          } else {
-            await updateQueueItemInIDB({
-              ...item,
-              id: rawItem.id,
-              retry_count: nextRetry,
-              status: 'FAILED_RETRYABLE',
-              error_message: err.message || String(err)
-            });
-          }
+          // Never purge local mutations on network or server timeouts
+          await updateQueueItemInIDB({
+            ...item,
+            id: rawItem.id,
+            retry_count: Math.min(nextRetry, 10),
+            status: 'FAILED_RETRYABLE',
+            error_message: err.message || String(err)
+          });
         }
       }
       // Dependency Recovery Pass: retry deferred occurrences whose parent is now synced
@@ -849,8 +876,30 @@ export class SyncRepository {
 
         if (remoteAgendas && Array.isArray(remoteAgendas)) {
           const localAgendas = await getAgendasFromIDB();
+          const currentQueue = await getOfflineQueue();
+          const pendingCreateAgendaIds = new Set(
+            currentQueue
+              .filter(i => i.entity_type === 'agenda' && i.operation === 'CREATE')
+              .map(i => i.entity_id)
+          );
+          const pendingDeleteAgendaIds = new Set(
+            currentQueue
+              .filter(i => i.entity_type === 'agenda' && i.operation === 'DELETE')
+              .map(i => i.entity_id)
+          );
+          const remoteAgendaIds = new Set(remoteAgendas.map((r: any) => r.id));
+
           const agendaMap = new Map<string, IDBAgenda>();
-          localAgendas.forEach(a => agendaMap.set(a.id, a));
+
+          // Clean up local agendas that were deleted on remote
+          for (const local of localAgendas) {
+            if (remoteAgendaIds.has(local.id) || pendingCreateAgendaIds.has(local.id)) {
+              agendaMap.set(local.id, local);
+            } else {
+              console.log(`[SYNC ENGINE] Remote deletion detected: removing local agenda ${local.id} ("${local.title}")`);
+              await deleteAgendaFromIDB(local.id);
+            }
+          }
 
           remoteAgendas.forEach((r: any) => {
             const local = agendaMap.get(r.id);
@@ -885,6 +934,31 @@ export class SyncRepository {
           });
 
           await saveAgendasToIDB(Array.from(agendaMap.values()));
+
+          // Bi-directional recovery: only push offline-created local agendas that have pending CREATE
+          for (const local of localAgendas) {
+            const belongsToUser = !local.user_id || local.user_id === user.id || local.user_id === 'offline_user';
+            if (belongsToUser && !remoteAgendaIds.has(local.id) && pendingCreateAgendaIds.has(local.id) && !pendingDeleteAgendaIds.has(local.id)) {
+              console.log(`[SYNC ENGINE] Bi-directional recovery: Pushing unsynced local agenda ${local.id} ("${local.title}") to Supabase...`);
+              const payload = sanitizeAgendaForSupabase(local);
+              payload.id = local.id;
+              payload.user_id = user.id;
+
+              let { error: pushErr } = await supabase.from('agendas').upsert(payload);
+              if (pushErr && pushErr.code === 'PGRST204' && (payload as any).time_mode !== undefined) {
+                delete (payload as any).time_mode;
+                const retryPush = await supabase.from('agendas').upsert(payload);
+                pushErr = retryPush.error;
+              }
+
+              if (pushErr) {
+                console.warn(`[SYNC ENGINE] Bi-directional recovery push failed for ${local.id}:`, pushErr);
+              } else {
+                console.log(`[SYNC ENGINE] Successfully pushed unsynced local agenda ${local.id} to Supabase!`);
+                syncedCount++;
+              }
+            }
+          }
         }
 
         // B. Reminders & Occurrences Reconciliation

@@ -40,14 +40,14 @@ export function buildUpcomingWidgetPayload(agendas: WidgetAgendaLike[], baseDate
   });
 
   if (todayAgendas.length === 0) {
-    const nowTime = baseDate.getTime();
-    const nextWeekTime = nowTime + 7 * 24 * 60 * 60 * 1000;
+    const startOfToday = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate()).getTime();
+    const endOfRange = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + 8, 23, 59, 59, 999).getTime();
     todayAgendas = agendas.filter(a => {
       if (a.status === 'cancelled') return false;
       if (getAgendaTimeMode(a) === 'unscheduled') return false;
       if (!a.scheduled_at) return false;
       const t = new Date(a.scheduled_at).getTime();
-      return t >= nowTime && t <= nextWeekTime;
+      return t >= startOfToday && t <= endOfRange;
     }).slice(0, 3);
   }
 
@@ -59,11 +59,11 @@ export function buildUpcomingWidgetPayload(agendas: WidgetAgendaLike[], baseDate
 
 /**
  * Builds payload for the 7-Days interactive widget.
- * Filters agendas for today up to +7 days ahead, sorted by scheduled_at timestamp.
+ * Filters agendas for today up to +8 days ahead (inclusive through 23:59:59), sorted by scheduled_at timestamp.
  */
 export function buildAgenda7DaysWidgetPayload(agendas: WidgetAgendaLike[], baseDate = new Date()): Agenda7DaysWidgetItem[] {
   const startOfToday = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate()).getTime();
-  const endOf7Days = startOfToday + 8 * 24 * 60 * 60 * 1000;
+  const endOf7Days = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + 8, 23, 59, 59, 999).getTime();
 
   return agendas
     .filter(a => {

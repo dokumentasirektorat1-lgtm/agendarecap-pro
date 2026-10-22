@@ -44,10 +44,10 @@ self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Skip API routes, webpack-hmr, and browser extensions from HTTP caching
+  // Skip API routes, Next.js internals (_next/ chunks, HMR, Turbopack), and browser extensions from Service Worker caching
   if (
     url.pathname.startsWith('/api/') || 
-    url.pathname.startsWith('/_next/webpack-hmr') ||
+    url.pathname.startsWith('/_next/') ||
     url.protocol === 'chrome-extension:'
   ) return;
 
@@ -69,7 +69,8 @@ self.addEventListener('fetch', (event) => {
           if (event.request.mode === 'navigate') {
             return caches.match('/');
           }
-          return Response.error();
+          // Return a 503 response instead of Response.error() to prevent "TypeError: Failed to fetch" in browser console
+          return new Response(null, { status: 503, statusText: 'Offline' });
         });
 
       return cachedResponse || fetchPromise;

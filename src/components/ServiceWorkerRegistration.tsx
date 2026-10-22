@@ -64,22 +64,45 @@ export default function ServiceWorkerRegistration() {
         const fcmToken = await getNativeFCMToken();
         if (fcmToken) {
           console.log('[NATIVE FCM] Syncing Android FCM token to push_subscribers');
-          await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subscription: {
+          // On Capacitor native, relative fetch to /api/ fails because there is no local web server.
+          // Upsert directly into Supabase push_subscribers table instead.
+          if (typeof window !== 'undefined' && !window.location.protocol.startsWith('http')) {
+            try {
+              const { createClient } = await import('@/lib/supabase/client');
+              const supabase = createClient();
+              const { data: { session } } = await supabase.auth.getSession();
+              await supabase.from('push_subscribers').upsert({
                 endpoint: `https://fcm.googleapis.com/fcm/send/${fcmToken}`,
                 fcm_token: fcmToken,
-                keys: { p256dh: 'native_fcm', auth: 'native_fcm' }
-              },
-              fcm_token: fcmToken,
-              deviceInfo: {
-                userAgent: navigator.userAgent,
-                platform: 'Android Native App'
-              }
-            })
-          }).catch((e) => console.warn('[NATIVE FCM] Direct subscribe notice:', e));
+                subscription: {
+                  endpoint: `https://fcm.googleapis.com/fcm/send/${fcmToken}`,
+                  fcm_token: fcmToken,
+                  keys: { p256dh: 'native_fcm', auth: 'native_fcm' }
+                },
+                user_id: session?.user?.id || null,
+                last_seen_at: new Date().toISOString()
+              });
+            } catch (supaErr) {
+              console.warn('[NATIVE FCM] Direct Supabase push sync notice:', supaErr);
+            }
+          } else {
+            await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                subscription: {
+                  endpoint: `https://fcm.googleapis.com/fcm/send/${fcmToken}`,
+                  fcm_token: fcmToken,
+                  keys: { p256dh: 'native_fcm', auth: 'native_fcm' }
+                },
+                fcm_token: fcmToken,
+                deviceInfo: {
+                  userAgent: navigator.userAgent,
+                  platform: 'Android Native App'
+                }
+              })
+            }).catch((e) => console.warn('[NATIVE FCM] Direct subscribe notice:', e));
+          }
         }
       } catch (fcmErr) {
         console.warn('[NATIVE FCM] Registration notice:', fcmErr);

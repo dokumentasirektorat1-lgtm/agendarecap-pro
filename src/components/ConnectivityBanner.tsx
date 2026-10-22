@@ -42,6 +42,10 @@ export default function ConnectivityBanner() {
         setIsSupabaseReachable(true);
         setLastSyncTime(new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false }));
         if (refreshAuth) refreshAuth();
+        try {
+          const { useStore } = await import("@/store/useStore");
+          await useStore.getState().fetchAgendas();
+        } catch (_) {}
       } else {
         setSyncState('error');
         setSyncErrorMsg(res.errors[0] || 'Sync failed');

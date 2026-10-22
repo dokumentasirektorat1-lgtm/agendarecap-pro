@@ -586,15 +586,23 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
             continue;
           }
 
-          // Purge queue items that have failed excessively (> 5 retries)
-          if ((item.retry_count || 0) > 5 || item.status === 'FAILED_FATAL') {
-            console.warn(`[IDB REPAIR] Purging permanently failed queue item ${item.id} (Attempt ${item.retry_count})`);
+          // Only purge permanently fatal queue items (unsupported/corrupted format)
+          if (item.status === 'FAILED_FATAL') {
+            console.warn(`[IDB REPAIR] Purging fatal failed queue item ${item.id}`);
             queueStore.delete(item.id);
             repairedQueue++;
             continue;
           }
 
           let updated = false;
+
+          // If item accumulated retry counts from server timeouts, reset it to give it another chance
+          if ((item.retry_count || 0) >= 5 || item.status === 'FAILED_RETRYABLE') {
+            item.status = 'PENDING';
+            item.retry_count = 0;
+            item.error_message = undefined;
+            updated = true;
+          }
 
           if (item.payload) {
             if (!item.payload.user_id || item.payload.user_id === 'undefined' || item.payload.user_id === 'offline_user' || item.payload.user_id !== userId) {
@@ -615,13 +623,6 @@ export async function repairOrphanDataAndQueueInIDB(userId: string): Promise<{
               delete item.payload.user_id;
               updated = true;
             }
-          }
-
-          if (item.status === 'FAILED_RETRYABLE') {
-            item.status = 'PENDING';
-            item.retry_count = 0;
-            item.error_message = undefined;
-            updated = true;
           }
 
           if (updated) {

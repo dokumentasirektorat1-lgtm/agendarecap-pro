@@ -4,7 +4,7 @@ const devServerUrl = process.env.CAPACITOR_SERVER_URL;
 
 const config: CapacitorConfig = {
   appId: 'com.agendarecap.app',
-  appName: 'AgendaRecap Pro',
+  appName: 'Agenda Rektor',
   webDir: 'out',
   server: devServerUrl ? {
     url: devServerUrl,
