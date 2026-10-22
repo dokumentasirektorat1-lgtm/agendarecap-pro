@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createClient } from "@/lib/supabase/client";
 import { agendaRepository } from "@/lib/repositories/agenda-repository";
 import { syncRepository } from "@/lib/repositories/sync-repository";
+import { saveAgendasToIDB } from "@/lib/idb";
 import Swal from "sweetalert2";
 
 import { getAgendaDateDisplay, getAgendaTimeDisplay, getAgendaTimeMode, AgendaTimeMode } from "@/lib/agenda-time";
@@ -116,6 +117,22 @@ export const useStore = create<StoreState>((set, get) => {
         } catch (syncErr) {
           console.warn('[STORE] syncRepository.runSync notice:', syncErr);
         }
+
+        // Resilient Server API Reconciliation on Web
+        if (!isNativePlatform()) {
+          try {
+            const apiRes = await fetch('/api/agendas');
+            if (apiRes.ok) {
+              const apiData = await apiRes.json();
+              if (apiData?.agendas && Array.isArray(apiData.agendas) && apiData.agendas.length > 0) {
+                await saveAgendasToIDB(apiData.agendas);
+              }
+            }
+          } catch (apiErr) {
+            console.warn('[STORE] /api/agendas server sync notice:', apiErr);
+          }
+        }
+
         const updatedLocal = await agendaRepository.getLocal();
         const updatedDeduped = deduplicateAgendas(updatedLocal as Agenda[]);
         set({ agendas: updatedDeduped });

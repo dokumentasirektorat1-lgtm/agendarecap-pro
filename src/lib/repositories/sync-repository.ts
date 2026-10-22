@@ -862,7 +862,6 @@ export class SyncRepository {
           const { data, error: agendaFetchError } = await supabase
             .from('agendas')
             .select('*')
-            .eq('user_id', user.id)
             .order('scheduled_at', { ascending: true });
 
           if (agendaFetchError) {
