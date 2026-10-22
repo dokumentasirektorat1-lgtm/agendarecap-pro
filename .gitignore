@@ -40,3 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 *.xlsx
+
+# Android APK builds (too large for GitHub)
+*.apk
+/public/downloads/
