@@ -20,6 +20,9 @@ class MainActivity : BridgeActivity() {
         private const val PREFS_NAME = "agendarecap_lifecycle_prefs"
         private const val KEY_CRASH_COUNT = "renderer_crash_count"
         private const val KEY_LAST_CRASH_TIME = "last_crash_time_ms"
+
+        // Action sent from widget "Refresh" button
+        const val ACTION_WIDGET_REFRESH = "com.agendarecap.app.ACTION_WIDGET_REFRESH"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -41,18 +44,16 @@ class MainActivity : BridgeActivity() {
         handleWidgetIntent(intent)
 
         // Ensure home screen widgets are updated with current state
-        try {
-            ConsultationWidgetProvider.updateAllWidgets(this)
-            Agenda7DaysWidgetProvider.updateAllWidgets(this)
-        } catch (ignored: Exception) {}
+        refreshWidgets()
+
+        // Schedule periodic background widget refresh via WorkManager (15-min interval)
+        // Uses KEEP policy so calling this every onCreate is safe — won't duplicate jobs
+        WidgetRefreshWorker.schedule(this)
     }
 
     override fun onResume() {
         super.onResume()
-        try {
-            ConsultationWidgetProvider.updateAllWidgets(this)
-            Agenda7DaysWidgetProvider.updateAllWidgets(this)
-        } catch (ignored: Exception) {}
+        refreshWidgets()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -60,6 +61,38 @@ class MainActivity : BridgeActivity() {
         setIntent(intent)
         // Handle widget tap intent extras when app is already running
         handleWidgetIntent(intent)
+        // If this was a "refresh" intent from the widget button, also refresh JS layer
+        if (intent.action == ACTION_WIDGET_REFRESH) {
+            triggerJsWidgetSync()
+        }
+    }
+
+    /** Refreshes all widget RemoteViews from SharedPreferences data. */
+    private fun refreshWidgets() {
+        try {
+            ConsultationWidgetProvider.updateAllWidgets(this)
+            Agenda7DaysWidgetProvider.updateAllWidgets(this)
+        } catch (ignored: Exception) {}
+    }
+
+    /**
+     * Triggers the JS layer to re-push widget data to native.
+     * Called when user taps the manual "Refresh" button on a widget.
+     * JS must expose window.__agendaSyncWidgets() for this to work.
+     */
+    private fun triggerJsWidgetSync() {
+        mainHandler.postDelayed({
+            try {
+                val webView = bridge?.webView ?: return@postDelayed
+                webView.evaluateJavascript(
+                    "(function(){ if(window.__agendaSyncWidgets) window.__agendaSyncWidgets(); })();",
+                    null
+                )
+                Log.d(TAG, "Triggered JS widget sync")
+            } catch (e: Exception) {
+                Log.w(TAG, "JS widget sync trigger failed: ${e.message}")
+            }
+        }, 800)
     }
 
     /**

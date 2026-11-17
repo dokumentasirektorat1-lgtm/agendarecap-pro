@@ -5,6 +5,7 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import DynamicBranding from "@/components/DynamicBranding";
 import ReminderNotifier from "@/components/ReminderNotifier";
 import ClientAuthGuard from "@/components/ClientAuthGuard";
+import WidgetSyncBridge from "@/components/WidgetSyncBridge";
 
 const outfit = Outfit({ subsets: ["latin"] });
 
@@ -30,6 +31,7 @@ export default function RootLayout({
           <ReminderNotifier />
           <DynamicBranding />
           {children}
+          <WidgetSyncBridge />
           <ServiceWorkerRegistration />
         </ClientAuthGuard>
       </body>

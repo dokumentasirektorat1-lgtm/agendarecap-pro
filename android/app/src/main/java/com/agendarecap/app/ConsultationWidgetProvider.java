@@ -16,7 +16,10 @@ import org.json.JSONArray;
  * Displays a scrollable list of active consultation items on the Android home screen
  * using a ListView backed by ConsultationWidgetService (RemoteViewsService).
  * Provides a "+ Catatan" button to open the consultation page for adding notes.
+ * Provides a "↻" refresh button that opens MainActivity with ACTION_WIDGET_REFRESH
+ * so the JS layer can re-push fresh data to SharedPreferences.
  * Data is fed by NativeAlarmPlugin.updateConsultationWidgetData().
+ * Auto-refreshed every 15 minutes via WidgetRefreshWorker (WorkManager).
  */
 public class ConsultationWidgetProvider extends AppWidgetProvider {
 
@@ -66,6 +69,19 @@ public class ConsultationWidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
         views.setOnClickPendingIntent(R.id.consultation_widget_container, consultPendingIntent);
+
+        // "↻" Refresh button → open MainActivity with ACTION_WIDGET_REFRESH
+        // MainActivity.onNewIntent() will trigger JS layer to re-push data
+        Intent refreshIntent = new Intent(context, MainActivity.class);
+        refreshIntent.setAction(MainActivity.ACTION_WIDGET_REFRESH);
+        refreshIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent refreshPendingIntent = PendingIntent.getActivity(
+                context,
+                appWidgetId + 300,
+                refreshIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        views.setOnClickPendingIntent(R.id.consultation_btn_refresh, refreshPendingIntent);
 
         // "+ Catatan" button → open consultation page for adding notes
         Intent addNoteIntent = new Intent(context, MainActivity.class);

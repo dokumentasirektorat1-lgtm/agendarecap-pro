@@ -21,6 +21,9 @@ import java.util.Locale;
  * Displays a scrollable list of agendas from today through the next 7 days
  * using a ListView backed by Agenda7DaysWidgetService (RemoteViewsService).
  * Data stored as flat array in SharedPreferences, populated from NativeAlarmPlugin.
+ * Provides a "↻" refresh button that opens MainActivity with ACTION_WIDGET_REFRESH
+ * so the JS layer can re-push fresh data to SharedPreferences.
+ * Auto-refreshed every 15 minutes via WidgetRefreshWorker (WorkManager).
  */
 public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
 
@@ -71,6 +74,19 @@ public class Agenda7DaysWidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
         views.setOnClickPendingIntent(R.id.agenda7_widget_container, mainPendingIntent);
+
+        // "↻" Refresh button → open MainActivity with ACTION_WIDGET_REFRESH
+        // MainActivity.onNewIntent() will trigger JS layer to re-push data
+        Intent refreshIntent = new Intent(context, MainActivity.class);
+        refreshIntent.setAction(MainActivity.ACTION_WIDGET_REFRESH);
+        refreshIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        PendingIntent refreshPendingIntent = PendingIntent.getActivity(
+                context,
+                appWidgetId + 400,
+                refreshIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+        views.setOnClickPendingIntent(R.id.agenda7_btn_refresh, refreshPendingIntent);
 
         // ---- Check if there are any items to show ----
         boolean hasItems = false;

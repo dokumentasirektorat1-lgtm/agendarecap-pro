@@ -32,6 +32,18 @@
             android:text="Konsultasi"
             android:textColor="#A1A1AA"
             android:textSize="10sp" />
+
+        <!-- Manual Refresh Button -->
+        <TextView
+            android:id="@+id/consultation_btn_refresh"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="↻"
+            android:textColor="#A1A1AA"
+            android:textSize="14sp"
+            android:paddingStart="8dp"
+            android:paddingEnd="2dp"
+            android:contentDescription="Refresh widget" />
     </LinearLayout>
 
     <!-- Count Badge + Add Note Button -->

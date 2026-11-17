@@ -39,6 +39,20 @@ export function syncWidgetData(agendas: Agenda[]) {
   }
 }
 
+/**
+ * Registers window.__agendaSyncWidgets so the Android layer (MainActivity)
+ * can trigger a re-push of widget data to SharedPreferences when the user taps
+ * the manual "↻ Refresh" button on a widget.
+ * Must be called once on app init (see ServiceWorkerRegistration or layout).
+ */
+export function registerWidgetSyncGlobal(getAgendas: () => Agenda[]) {
+  if (typeof window === 'undefined') return;
+  (window as typeof window & { __agendaSyncWidgets?: () => void }).__agendaSyncWidgets = () => {
+    console.log('[WIDGET SYNC] Manual refresh triggered from widget button');
+    syncWidgetData(getAgendas());
+  };
+}
+
 export type Agenda = {
   id: string;
   user_id?: string;
